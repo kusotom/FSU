@@ -477,3 +477,23 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 - Prometheus 指标：`http://127.0.0.1:8000/metrics`
 
 如需继续扩展（如工单系统、审计日志、策略审批流），建议沿用当前多租户权限模型，不跨层绕过权限依赖。
+
+---
+
+## 15. 最近改动说明（2026-03-06）
+
+本次已完成并验证的改动：
+
+- TimescaleDB 默认启用：
+  - 新增配置项 `TIMESCALEDB_AUTO_ENABLE`（默认 `true`）。
+  - 启动时自动尝试启用扩展、hypertable、压缩与保留策略。
+- 启动性能与稳定性修复：
+  - 修复了启动阶段每次都重建 `telemetry_history` 主键的问题。
+  - 当前逻辑仅在主键不符合 `(id, collected_at)` 时才调整，避免大表反复锁表。
+- 性能基准脚本与文档补充：
+  - 新增 `backend/scripts/benchmark_timescaledb_compare.py`。
+  - 新增 `backend/scripts/benchmark_timescaledb_stress.py`。
+  - README 已补充实测参数与结果（并发写入、压缩前后查询对比）。
+- 运行链路回归：
+  - 已执行 `backend/scripts/test_all_metrics.py`，结果 `PASS`。
+  - 覆盖登录、采集、实时最新值、历史查询、告警触发/恢复主链路。
