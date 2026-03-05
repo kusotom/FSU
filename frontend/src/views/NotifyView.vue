@@ -1,0 +1,230 @@
+﻿<template>
+  <AppShell>
+    <div class="bar">
+      <h2>通知策略（管理员）</h2>
+    </div>
+
+    <el-row :gutter="16">
+      <el-col :xs="24" :md="12">
+        <el-card>
+          <template #header>
+            <div class="card-title">
+              <span>通知通道</span>
+              <el-button size="small" type="primary" @click="createChannel">新增</el-button>
+            </div>
+          </template>
+          <el-form :model="channelForm" label-width="92px" class="inline-form">
+            <el-form-item label="名称">
+              <el-input v-model="channelForm.name" placeholder="例如：主群机器人" />
+            </el-form-item>
+            <el-form-item label="类型">
+              <el-select v-model="channelForm.channel_type" style="width: 100%">
+                <el-option label="企业微信机器人" value="wechat_robot" />
+                <el-option label="通用回调" value="webhook" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="地址">
+              <el-input v-model="channelForm.endpoint" placeholder="https://..." />
+            </el-form-item>
+          </el-form>
+
+          <el-table :data="channels" size="small" stripe>
+            <el-table-column prop="id" label="编号" width="70" />
+            <el-table-column prop="name" label="名称" />
+            <el-table-column label="类型" width="130">
+              <template #default="{ row }">{{ channelTypeLabel(row.channel_type) }}</template>
+            </el-table-column>
+            <el-table-column prop="is_enabled" label="启用" width="90">
+              <template #default="{ row }">{{ row.is_enabled ? "是" : "否" }}</template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :md="12">
+        <el-card>
+          <template #header>
+            <div class="card-title">
+              <span>通知策略</span>
+              <el-button size="small" type="primary" @click="createPolicy">新增</el-button>
+            </div>
+          </template>
+          <el-form :model="policyForm" label-width="92px" class="inline-form">
+            <el-form-item label="策略名称">
+              <el-input v-model="policyForm.name" placeholder="例如：一级告警策略" />
+            </el-form-item>
+            <el-form-item label="通知通道">
+              <el-select v-model="policyForm.channel_id" style="width: 100%">
+                <el-option
+                  v-for="item in channels"
+                  :key="item.id"
+                  :label="`${item.name} (${channelTypeLabel(item.channel_type)})`"
+                  :value="item.id"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="最小级别">
+              <el-input-number v-model="policyForm.min_alarm_level" :min="1" :max="4" />
+            </el-form-item>
+            <el-form-item label="事件类型">
+              <el-checkbox-group v-model="policyForm.event_type_list">
+                <el-checkbox-button
+                  v-for="item in eventTypeOptions"
+                  :key="item.value"
+                  :label="item.value"
+                >
+                  {{ item.label }}
+                </el-checkbox-button>
+              </el-checkbox-group>
+            </el-form-item>
+          </el-form>
+
+          <el-table :data="policies" size="small" stripe>
+            <el-table-column prop="id" label="编号" width="70" />
+            <el-table-column prop="name" label="策略名称" />
+            <el-table-column prop="channel_id" label="通道编号" width="90" />
+            <el-table-column label="级别" width="80">
+              <template #default="{ row }">{{ row.min_alarm_level }}级</template>
+            </el-table-column>
+            <el-table-column label="事件">
+              <template #default="{ row }">{{ eventTypesLabel(row.event_types) }}</template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-col>
+    </el-row>
+  </AppShell>
+</template>
+
+<script setup>
+import { onMounted, reactive, ref } from "vue";
+import { ElMessage } from "element-plus";
+import AppShell from "../components/AppShell.vue";
+import http from "../api/http";
+
+const channels = ref([]);
+const policies = ref([]);
+
+const channelForm = reactive({
+  name: "",
+  channel_type: "wechat_robot",
+  endpoint: "",
+  secret: "",
+  is_enabled: true,
+});
+
+const policyForm = reactive({
+  name: "",
+  channel_id: null,
+  min_alarm_level: 2,
+  event_type_list: ["trigger", "recover"],
+  is_enabled: true,
+});
+
+const eventTypeOptions = [
+  { label: "触发", value: "trigger" },
+  { label: "恢复", value: "recover" },
+  { label: "确认", value: "ack" },
+  { label: "关闭", value: "close" },
+];
+
+const eventTypeLabelMap = {
+  trigger: "触发",
+  recover: "恢复",
+  ack: "确认",
+  close: "关闭",
+};
+
+const channelTypeLabel = (type) => {
+  if (type === "wechat_robot") return "企业微信机器人";
+  if (type === "webhook") return "通用回调";
+  return "未知";
+};
+
+const eventTypesLabel = (raw) => {
+  const list = Array.isArray(raw)
+    ? raw
+    : String(raw || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+  if (list.length === 0) return "-";
+  return list.map((item) => eventTypeLabelMap[item] || item).join("、");
+};
+
+const loadData = async () => {
+  const [channelRes, policyRes] = await Promise.all([
+    http.get("/notify/channels"),
+    http.get("/notify/policies"),
+  ]);
+  channels.value = channelRes.data;
+  policies.value = policyRes.data;
+};
+
+const createChannel = async () => {
+  if (!channelForm.name || !channelForm.endpoint) {
+    ElMessage.warning("请填写通道名称和地址");
+    return;
+  }
+  await http.post("/notify/channels", channelForm);
+  ElMessage.success("通道创建成功");
+  channelForm.name = "";
+  channelForm.endpoint = "";
+  channelForm.secret = "";
+  channelForm.is_enabled = true;
+  await loadData();
+};
+
+const createPolicy = async () => {
+  if (!policyForm.name || !policyForm.channel_id) {
+    ElMessage.warning("请填写策略名称并选择通知通道");
+    return;
+  }
+  if (!policyForm.event_type_list.length) {
+    ElMessage.warning("请至少选择一种事件类型");
+    return;
+  }
+  await http.post("/notify/policies", {
+    name: policyForm.name,
+    channel_id: policyForm.channel_id,
+    min_alarm_level: policyForm.min_alarm_level,
+    event_types: policyForm.event_type_list.join(","),
+    is_enabled: policyForm.is_enabled,
+  });
+  ElMessage.success("策略创建成功");
+  policyForm.name = "";
+  policyForm.channel_id = null;
+  policyForm.min_alarm_level = 2;
+  policyForm.event_type_list = ["trigger", "recover"];
+  policyForm.is_enabled = true;
+  await loadData();
+};
+
+onMounted(async () => {
+  try {
+    await loadData();
+  } catch (_e) {
+    ElMessage.error("加载通知配置失败（需要管理员权限）");
+  }
+});
+</script>
+
+<style scoped>
+.bar {
+  margin-bottom: 12px;
+}
+
+h2 {
+  margin: 0;
+}
+
+.card-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.inline-form {
+  margin-bottom: 12px;
+}
+</style>

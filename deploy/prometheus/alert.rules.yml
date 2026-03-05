@@ -1,0 +1,38 @@
+groups:
+  - name: fsu-platform-rules
+    rules:
+      - alert: 后端服务不可用
+        expr: up{job="backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 后端不可用
+          description: 后端服务连续 1 分钟无法被 Prometheus 抓取。
+
+      - alert: MQTT桥接不可用
+        expr: up{job="mqtt_bridge"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: MQTT桥接不可用
+          description: MQTT 采集桥接服务连续 2 分钟不可达。
+
+      - alert: 采集队列积压过高
+        expr: max_over_time(fsu_ingest_queue_size[5m]) > 5000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 采集队列积压
+          description: 最近 5 分钟采集队列峰值超过 5000 条，请检查消费能力。
+
+      - alert: 采集接口延迟过高
+        expr: histogram_quantile(0.95, sum by (le) (rate(fsu_ingest_request_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 采集接口 P95 延迟过高
+          description: 最近 10 分钟采集接口 P95 延迟超过 1 秒。

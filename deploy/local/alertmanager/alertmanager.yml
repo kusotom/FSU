@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: 默认接收器
+  group_by:
+    - alertname
+    - severity
+    - job
+  group_wait: 30s
+  group_interval: 2m
+  repeat_interval: 2h
+
+receivers:
+  - name: 默认接收器

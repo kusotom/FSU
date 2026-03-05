@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: fsu-监控看板
+    folder: FSU
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

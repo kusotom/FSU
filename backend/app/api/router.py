@@ -1,0 +1,26 @@
+from fastapi import APIRouter
+
+from app.api.routes import (
+    alarm_rules,
+    alarms,
+    auth,
+    ingest,
+    notify,
+    reports,
+    sites,
+    telemetry,
+    tenants,
+    users,
+)
+
+api_router = APIRouter()
+api_router.include_router(auth.router)
+api_router.include_router(tenants.router)
+api_router.include_router(sites.router)
+api_router.include_router(ingest.router)
+api_router.include_router(telemetry.router)
+api_router.include_router(alarms.router)
+api_router.include_router(alarm_rules.router)
+api_router.include_router(users.router)
+api_router.include_router(reports.router)
+api_router.include_router(notify.router)

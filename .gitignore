@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+backend/fsu.db
+backend/fsu.db-shm
+backend/fsu.db-wal
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Environment
+.env
+backend/.env
+
+# Local runtime artifacts
+runtime-logs/
+runtime-data/
+snapshots/
+backend/snapshots/

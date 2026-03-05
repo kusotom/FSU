@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: fsu-本地看板
+    folder: FSU
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: C:/Users/Administrator/Desktop/fsu-platform/deploy/local/grafana/dashboards

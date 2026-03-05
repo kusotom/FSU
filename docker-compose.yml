@@ -1,0 +1,147 @@
+version: "3.9"
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: fsu-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+
+  postgres:
+    image: postgres:16
+    container_name: fsu-postgres
+    environment:
+      POSTGRES_DB: fsu
+      POSTGRES_USER: fsu
+      POSTGRES_PASSWORD: fsu123456
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fsu -d fsu"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+    container_name: fsu-backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://fsu:fsu123456@postgres:5432/fsu
+      AUTO_CREATE_SCHEMA: "false"
+      CORS_ORIGINS: http://localhost:5173,http://localhost:8080
+      SECRET_KEY: change_me_in_production
+      INGEST_MODE: queue
+      INGEST_QUEUE_WORKERS: 4
+      INGEST_QUEUE_BATCH_SIZE: 100
+      INGEST_QUEUE_BATCH_WAIT_MS: 120
+      SYSTEM_RULE_EVAL_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  mqtt-bridge:
+    build:
+      context: ./backend
+    container_name: fsu-mqtt-bridge
+    command: ["python", "scripts/mqtt_ingest_bridge.py"]
+    environment:
+      MQTT_BROKER_HOST: mosquitto
+      MQTT_BROKER_PORT: 1883
+      MQTT_TOPIC: fsu/telemetry/#
+      MQTT_QOS: 1
+      BACKEND_INGEST_URL: http://backend:8000/api/v1/ingest/telemetry
+      BACKEND_TIMEOUT_SECONDS: 6
+      BACKEND_RETRY_TIMES: 2
+      BRIDGE_QUEUE_MAXSIZE: 50000
+      BRIDGE_WORKER_COUNT: 4
+      BRIDGE_METRICS_PORT: 9108
+    depends_on:
+      - mosquitto
+      - backend
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: fsu-postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: postgresql://fsu:fsu123456@postgres:5432/fsu?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "9187:9187"
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: fsu-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - backend
+      - mqtt-bridge
+      - postgres-exporter
+      - alertmanager
+    ports:
+      - "9090:9090"
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: fsu-alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./deploy/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "9093:9093"
+
+  grafana:
+    image: grafana/grafana-oss:11.1.4
+    container_name: fsu-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin123456
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_HTTP_PORT: 3000
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/fsu-realtime-overview.json
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./deploy/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deploy/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: fsu-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:
+  pgdata:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
