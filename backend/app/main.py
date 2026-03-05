@@ -60,27 +60,21 @@ def _ensure_timescaledb_defaults():
         "CREATE EXTENSION IF NOT EXISTS timescaledb;",
         """
         DO $$
+        DECLARE
+          pk_columns TEXT;
         BEGIN
-          IF EXISTS (
-            SELECT 1
-            FROM pg_constraint
-            WHERE conname = 'telemetry_history_pkey'
-              AND conrelid = 'telemetry_history'::regclass
-          ) THEN
+          SELECT string_agg(a.attname, ',' ORDER BY ord.idx)
+          INTO pk_columns
+          FROM pg_constraint c
+          JOIN LATERAL unnest(c.conkey) WITH ORDINALITY ord(attnum, idx) ON TRUE
+          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ord.attnum
+          WHERE c.conrelid = 'telemetry_history'::regclass
+            AND c.contype = 'p';
+
+          IF pk_columns IS NULL THEN
+            ALTER TABLE telemetry_history ADD CONSTRAINT telemetry_history_pkey PRIMARY KEY (id, collected_at);
+          ELSIF pk_columns <> 'id,collected_at' THEN
             ALTER TABLE telemetry_history DROP CONSTRAINT telemetry_history_pkey;
-          END IF;
-        END
-        $$;
-        """,
-        """
-        DO $$
-        BEGIN
-          IF NOT EXISTS (
-            SELECT 1
-            FROM pg_constraint
-            WHERE conname = 'telemetry_history_pkey'
-              AND conrelid = 'telemetry_history'::regclass
-          ) THEN
             ALTER TABLE telemetry_history ADD CONSTRAINT telemetry_history_pkey PRIMARY KEY (id, collected_at);
           END IF;
         END
