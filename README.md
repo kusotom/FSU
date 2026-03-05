@@ -390,6 +390,36 @@ python scripts\load_test_2000.py --base-url http://127.0.0.1:8000 --devices 2000
 python scripts\load_test_2000_realtime.py --base-url http://127.0.0.1:8000 --devices 2000 --rounds 1 --cycle-seconds 15 --concurrency 300 --max-connections 1200 --retries 1
 ```
 
+### 11.3 TimescaleDB 性能对比（2026-03-06 实测）
+
+脚本：
+- `backend/scripts/benchmark_timescaledb_compare.py`（基础对比）
+- `backend/scripts/benchmark_timescaledb_stress.py`（并发写入 + 压缩前后对比）
+
+压力对比命令：
+
+```powershell
+cd C:\Users\Administrator\Desktop\fsu-platform\backend
+python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batch-rows 5000 --points 2000 --span-days 60 --runs 5
+```
+
+关键结果（`bench_pg_stress` vs `bench_ts_stress`）：
+- 写入（120 万条，8 并发）：
+  - PostgreSQL 普通表：`6.714s`
+  - Timescale hypertable：`6.977s`（约慢 3.9%）
+- 30 天范围计数查询：
+  - PostgreSQL 普通表：`109.184ms`
+  - Timescale（压缩前）：`99.535ms`（约快 8.8%）
+  - Timescale（压缩后）：`25.148ms`（约快 77.0%）
+- 单点近 7 天 Top1000 查询：
+  - PostgreSQL 普通表：`0.107ms`
+  - Timescale（压缩后）：`0.136ms`（接近）
+
+结论：
+- Timescale 在大范围历史查询，尤其压缩后，有明显优势。
+- 高频小范围点查场景，普通表与 Timescale 差距较小。
+- 建议生产开启 `TIMESCALEDB_AUTO_ENABLE=true` 并保留压缩策略。
+
 ---
 
 ## 12. 常见问题排查
