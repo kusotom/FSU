@@ -50,10 +50,74 @@ def _ensure_runtime_indexes():
         logger.exception("runtime index ensure failed")
 
 
+def _ensure_timescaledb_defaults():
+    if settings.database_url.startswith("sqlite"):
+        return
+    if not settings.timescaledb_auto_enable:
+        return
+
+    ddl_list = [
+        "CREATE EXTENSION IF NOT EXISTS timescaledb;",
+        """
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'telemetry_history_pkey'
+              AND conrelid = 'telemetry_history'::regclass
+          ) THEN
+            ALTER TABLE telemetry_history DROP CONSTRAINT telemetry_history_pkey;
+          END IF;
+        END
+        $$;
+        """,
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'telemetry_history_pkey'
+              AND conrelid = 'telemetry_history'::regclass
+          ) THEN
+            ALTER TABLE telemetry_history ADD CONSTRAINT telemetry_history_pkey PRIMARY KEY (id, collected_at);
+          END IF;
+        END
+        $$;
+        """,
+        """
+        SELECT create_hypertable(
+          'telemetry_history',
+          'collected_at',
+          if_not_exists => TRUE,
+          migrate_data => TRUE,
+          chunk_time_interval => INTERVAL '1 day'
+        );
+        """,
+        """
+        ALTER TABLE telemetry_history SET (
+          timescaledb.compress,
+          timescaledb.compress_segmentby = 'point_id',
+          timescaledb.compress_orderby = 'collected_at DESC'
+        );
+        """,
+        "SELECT add_compression_policy('telemetry_history', INTERVAL '7 days', if_not_exists => TRUE);",
+        "SELECT add_retention_policy('telemetry_history', INTERVAL '90 days', if_not_exists => TRUE);",
+    ]
+    try:
+        with engine.begin() as conn:
+            for ddl in ddl_list:
+                conn.execute(text(ddl))
+    except Exception:
+        logger.exception("timescaledb auto enable failed")
+
+
 @app.on_event("startup")
 async def startup():
     if settings.auto_create_schema:
         Base.metadata.create_all(bind=engine)
+        _ensure_timescaledb_defaults()
         _ensure_runtime_indexes()
     db: Session = SessionLocal()
     try:

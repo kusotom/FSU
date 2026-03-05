@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     system_rule_inline_enabled: bool = False
     cors_origins: str = "http://localhost:5173"
     auto_create_schema: bool = True
+    timescaledb_auto_enable: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
