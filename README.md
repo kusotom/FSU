@@ -15,7 +15,7 @@
 - 后端：FastAPI + SQLAlchemy + Alembic
 - 前端：Vue 3 + Element Plus + Pinia + Vue Router + ECharts
 - 数据库：PostgreSQL（默认）
-- 可选时序增强：TimescaleDB 扩展（可选）
+- 时序增强：TimescaleDB 扩展（默认启用，可关闭）
 - 监控链路：Prometheus + Alertmanager + Grafana（可选本地一键启动）
 - 消息接入：HTTP Ingest（内置）+ MQTT Bridge（可选）
 
@@ -43,6 +43,7 @@
 
 后端启动时会自动执行：
 - 基础表结构检查（`AUTO_CREATE_SCHEMA=true` 时）。
+- TimescaleDB 扩展与时序策略启用（`TIMESCALEDB_AUTO_ENABLE=true` 时，默认开启）。
 - 内置角色与默认账号初始化。
 - 默认规则与示例站点数据初始化。
 - 关键索引检查（PostgreSQL）。
@@ -240,6 +241,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 ### 8.2 数据库连接池
 
 - `DATABASE_URL`：默认 PostgreSQL。
+- `TIMESCALEDB_AUTO_ENABLE`：是否在启动时自动启用 TimescaleDB（默认 `true`）。
 - `DB_POOL_SIZE`、`DB_MAX_OVERFLOW`：连接池容量。
 - `DB_POOL_TIMEOUT_SECONDS`：取连接超时。
 - `DB_POOL_RECYCLE_SECONDS`：连接回收周期。
@@ -281,14 +283,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 - `telemetry_latest(collected_at DESC)`
 - `monitor_point(point_key, device_id)`
 
-### 9.3 TimescaleDB（可选）
+### 9.3 TimescaleDB（默认启用）
 
-- 可选启用 Timescale 扩展增强时序写入与压缩能力。
+- 默认自动启用 Timescale 扩展，增强时序写入与压缩能力。
 - 迁移 `20260303_0006` 已包含 `telemetry_history` hypertable 转换。
 - 策略建议：
   - 最近 7 天不压缩。
   - 7 天前数据压缩。
   - 历史保留 90 天（按业务再调）。
+- 如需关闭自动启用，可在 `backend/.env` 中设置：`TIMESCALEDB_AUTO_ENABLE=false`。
 
 ### 9.4 PostgreSQL 快速初始化示例
 
