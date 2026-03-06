@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "FSU Monitoring Platform"
-    app_version: str = "0.2.0"
+    app_version: str = "0.21"
     debug: bool = True
     api_v1_prefix: str = "/api/v1"
 
