@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     auto_create_schema: bool = True
     timescaledb_auto_enable: bool = True
 
+    sms_tencent_enabled: bool = False
+    sms_tencent_secret_id: str = ""
+    sms_tencent_secret_key: str = ""
+    sms_tencent_sdk_app_id: str = ""
+    sms_tencent_sign_name: str = ""
+    sms_tencent_template_id: str = ""
+    sms_tencent_region: str = "ap-guangzhou"
+    sms_tencent_template_mode: str = "single_text"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @property

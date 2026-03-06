@@ -224,6 +224,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 - `GET /notify/policies`、`POST /notify/policies`：通知策略管理（模板管理权限）。
 - `GET /reports/alarm-summary`：告警统计报表（按权限裁剪）。
 
+说明：
+- `wechat_robot`：`endpoint` 填企业微信群机器人 webhook 地址。
+- `sms_tencent`：`endpoint` 填手机号列表（逗号分隔），例如 `+8613800138000,+8613900139000`。
+
 ### 7.8 可观测性
 
 - `GET /metrics`：Prometheus 采集指标。
@@ -267,6 +271,19 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 - `SYSTEM_RULE_EVAL_ENABLED`：是否开启系统规则调度。
 - `SYSTEM_RULE_EVAL_INTERVAL_SECONDS`：评估周期。
 - `SYSTEM_RULE_INLINE_ENABLED`：是否在采集链路内联评估。
+
+### 8.5 腾讯云短信（重要告警）
+
+- `SMS_TENCENT_ENABLED`：是否启用腾讯云短信通道（默认 `false`）。
+- `SMS_TENCENT_SECRET_ID`：腾讯云 API 密钥 ID。
+- `SMS_TENCENT_SECRET_KEY`：腾讯云 API 密钥 Key。
+- `SMS_TENCENT_SDK_APP_ID`：短信应用 SDK AppID。
+- `SMS_TENCENT_SIGN_NAME`：短信签名。
+- `SMS_TENCENT_TEMPLATE_ID`：短信模板 ID。
+- `SMS_TENCENT_REGION`：区域，默认 `ap-guangzhou`。
+- `SMS_TENCENT_TEMPLATE_MODE`：模板参数模式，支持：
+  - `single_text`：单变量模板（推荐，模板只放 `{1}`）。
+  - `alarm_v6`：六变量模板（事件/站点/设备/监控项/级别/状态）。
 
 ---
 
@@ -493,6 +510,11 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 推送结果判定支持企业微信 `errcode/errmsg` 解析，不再仅依赖 HTTP 状态码。
   - 新增 `POST /notify/channels/{id}/test` 测试接口。
   - 通知策略页面新增“通道测试”按钮与测试消息输入。
+- 腾讯云短信告警推送（v0.2 扩展）：
+  - 通知通道新增 `sms_tencent` 类型，支持多手机号（逗号分隔）。
+  - 重要告警可通过策略路由到短信通道（由策略 `min_alarm_level` 控制）。
+  - 支持腾讯云短信 API（TC3-HMAC-SHA256）签名发送与错误码解析。
+  - 支持短信通道测试发送（复用 `POST /notify/channels/{id}/test`）。
 
 - TimescaleDB 默认启用：
   - 新增配置项 `TIMESCALEDB_AUTO_ENABLE`（默认 `true`）。

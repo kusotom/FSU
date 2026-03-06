@@ -2,9 +2,21 @@ from datetime import datetime
 
 from pydantic import BaseModel, field_validator, model_validator
 
-VALID_CHANNEL_TYPES = {"wechat_robot", "webhook"}
+SMS_TENCENT_CHANNEL_TYPE = "sms_tencent"
+VALID_CHANNEL_TYPES = {"wechat_robot", "webhook", SMS_TENCENT_CHANNEL_TYPE}
 VALID_EVENT_TYPES = {"trigger", "recover", "ack", "close"}
 WECHAT_ROBOT_ENDPOINT_PREFIX = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
+
+
+def _is_valid_phone_token(token: str) -> bool:
+    raw = token.strip().replace(" ", "").replace("-", "")
+    if not raw:
+        return False
+    if raw.startswith("+"):
+        return raw[1:].isdigit() and 6 <= len(raw[1:]) <= 20
+    if raw.isdigit():
+        return 6 <= len(raw) <= 20
+    return False
 
 
 class NotifyChannelCreate(BaseModel):
@@ -19,9 +31,9 @@ class NotifyChannelCreate(BaseModel):
     def normalize_name(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("通知通道名称不能为空")
+            raise ValueError("channel name cannot be empty")
         if len(value) > 64:
-            raise ValueError("通知通道名称长度不能超过64")
+            raise ValueError("channel name length cannot exceed 64")
         return value
 
     @field_validator("channel_type")
@@ -29,7 +41,7 @@ class NotifyChannelCreate(BaseModel):
     def validate_channel_type(cls, value: str) -> str:
         value = value.strip()
         if value not in VALID_CHANNEL_TYPES:
-            raise ValueError("不支持的通知通道类型")
+            raise ValueError("unsupported channel type")
         return value
 
     @field_validator("endpoint")
@@ -37,9 +49,7 @@ class NotifyChannelCreate(BaseModel):
     def normalize_endpoint(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("通知地址不能为空")
-        if not value.startswith(("http://", "https://")):
-            raise ValueError("通知地址必须以 http:// 或 https:// 开头")
+            raise ValueError("endpoint cannot be empty")
         return value
 
     @field_validator("secret")
@@ -54,9 +64,21 @@ class NotifyChannelCreate(BaseModel):
     def validate_by_channel_type(self):
         if self.channel_type == "wechat_robot":
             if not self.endpoint.startswith(WECHAT_ROBOT_ENDPOINT_PREFIX):
-                raise ValueError("企业微信机器人地址格式不正确")
+                raise ValueError("invalid wechat robot endpoint")
             if "key=" not in self.endpoint:
-                raise ValueError("企业微信机器人地址缺少 key 参数")
+                raise ValueError("wechat robot endpoint missing key")
+            return self
+
+        if self.channel_type == SMS_TENCENT_CHANNEL_TYPE:
+            tokens = [item.strip() for item in self.endpoint.split(",") if item.strip()]
+            if not tokens:
+                raise ValueError("sms endpoint must contain at least one phone number")
+            invalid = [item for item in tokens if not _is_valid_phone_token(item)]
+            if invalid:
+                raise ValueError(f"invalid phone numbers: {','.join(invalid[:3])}")
+        else:
+            if not self.endpoint.startswith(("http://", "https://")):
+                raise ValueError("endpoint must start with http:// or https://")
         return self
 
 
@@ -84,9 +106,9 @@ class NotifyPolicyCreate(BaseModel):
     def normalize_name(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("策略名称不能为空")
+            raise ValueError("policy name cannot be empty")
         if len(value) > 64:
-            raise ValueError("策略名称长度不能超过64")
+            raise ValueError("policy name length cannot exceed 64")
         return value
 
     @field_validator("event_types")
@@ -94,12 +116,12 @@ class NotifyPolicyCreate(BaseModel):
     def normalize_event_types(cls, value: str) -> str:
         items = [item.strip() for item in value.split(",") if item.strip()]
         if not items:
-            raise ValueError("至少需要一个事件类型")
+            raise ValueError("at least one event type is required")
         deduped = []
         seen = set()
         for item in items:
             if item not in VALID_EVENT_TYPES:
-                raise ValueError(f"不支持的事件类型: {item}")
+                raise ValueError(f"unsupported event type: {item}")
             if item in seen:
                 continue
             seen.add(item)
@@ -110,12 +132,8 @@ class NotifyPolicyCreate(BaseModel):
     @classmethod
     def validate_min_alarm_level(cls, value: int) -> int:
         if value < 1 or value > 4:
-            raise ValueError("告警级别需在1到4之间")
+            raise ValueError("min_alarm_level must be between 1 and 4")
         return value
-
-
-class NotifyChannelTestRequest(BaseModel):
-    content: str | None = None
 
 
 class NotifyPolicyResponse(BaseModel):
@@ -129,3 +147,7 @@ class NotifyPolicyResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class NotifyChannelTestRequest(BaseModel):
+    content: str | None = None

@@ -20,6 +20,7 @@
             <el-form-item label="类型">
               <el-select v-model="channelForm.channel_type" style="width: 100%">
                 <el-option label="企业微信机器人" value="wechat_robot" />
+                <el-option label="腾讯云短信" value="sms_tencent" />
                 <el-option label="通用回调" value="webhook" />
               </el-select>
             </el-form-item>
@@ -35,6 +36,13 @@
               :closable="false"
               show-icon
               title="企业微信机器人地址示例：https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx"
+            />
+            <el-alert
+              v-if="channelForm.channel_type === 'sms_tencent'"
+              type="warning"
+              :closable="false"
+              show-icon
+              title="腾讯云短信地址填写手机号，多个号码用逗号分隔，例如：+8613800138000,+8613900139000"
             />
           </el-form>
 
@@ -157,11 +165,14 @@ const eventTypeLabelMap = {
 const endpointPlaceholder = computed(() =>
   channelForm.channel_type === "wechat_robot"
     ? "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
-    : "https://..."
+    : channelForm.channel_type === "sms_tencent"
+      ? "+8613800138000,+8613900139000"
+      : "https://..."
 );
 
 const channelTypeLabel = (type) => {
   if (type === "wechat_robot") return "企业微信机器人";
+  if (type === "sms_tencent") return "腾讯云短信";
   if (type === "webhook") return "通用回调";
   return "未知";
 };
@@ -198,6 +209,21 @@ const createChannel = async () => {
       !endpoint.includes("key=")
     ) {
       ElMessage.warning("企业微信机器人地址格式不正确");
+      return;
+    }
+  }
+  if (channelForm.channel_type === "sms_tencent") {
+    const phones = String(channelForm.endpoint || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!phones.length) {
+      ElMessage.warning("请填写至少一个手机号");
+      return;
+    }
+    const invalid = phones.filter((s) => !/^\+?\d{6,20}$/.test(s.replace(/\s|-/g, "")));
+    if (invalid.length) {
+      ElMessage.warning("手机号格式不正确，请检查");
       return;
     }
   }
