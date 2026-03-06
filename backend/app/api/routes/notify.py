@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_template_manager
@@ -9,12 +9,28 @@ from app.schemas.notify import (
     NotifyChannelCreate,
     NotifyChannelResponse,
     NotifyChannelTestRequest,
+    NotifyChannelUpdate,
     NotifyPolicyCreate,
     NotifyPolicyResponse,
+    NotifyPolicyUpdate,
 )
 from app.services.notifier import send_channel_test_message
 
 router = APIRouter(prefix="/notify", tags=["notify"])
+
+
+def _get_channel_or_404(db: Session, channel_id: int) -> NotifyChannel:
+    channel = db.get(NotifyChannel, channel_id)
+    if channel is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="通知通道不存在")
+    return channel
+
+
+def _get_policy_or_404(db: Session, policy_id: int) -> NotifyPolicy:
+    policy = db.get(NotifyPolicy, policy_id)
+    if policy is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="通知策略不存在")
+    return policy
 
 
 @router.get("/channels", response_model=list[NotifyChannelResponse])
@@ -54,15 +70,13 @@ async def test_channel(
     db: Session = Depends(get_db),
     _=Depends(require_template_manager),
 ):
-    channel = db.get(NotifyChannel, channel_id)
-    if channel is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="\u901a\u77e5\u901a\u9053\u4e0d\u5b58\u5728")
+    channel = _get_channel_or_404(db, channel_id)
     if not channel.is_enabled:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="\u901a\u77e5\u901a\u9053\u5df2\u7981\u7528\uff0c\u65e0\u6cd5\u6d4b\u8bd5"
         )
 
-    content = (payload.content or "").strip() or "\u3010FSU v0.2\u3011\u8fd9\u662f\u4e00\u6761\u901a\u77e5\u901a\u9053\u6d4b\u8bd5\u6d88\u606f"
+    content = (payload.content or "").strip() or "\u3010FSU v0.21\u3011\u8fd9\u662f\u4e00\u6761\u901a\u77e5\u901a\u9053\u6d4b\u8bd5\u6d88\u606f"
     success, detail = await send_channel_test_message(channel, content)
     if not success:
         raise HTTPException(
@@ -70,6 +84,48 @@ async def test_channel(
             detail=f"\u6d4b\u8bd5\u53d1\u9001\u5931\u8d25: {detail}",
         )
     return {"ok": True, "detail": detail}
+
+
+@router.put("/channels/{channel_id}", response_model=NotifyChannelResponse)
+def update_channel(
+    channel_id: int,
+    payload: NotifyChannelUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(require_template_manager),
+):
+    channel = _get_channel_or_404(db, channel_id)
+    exists = db.scalar(
+        select(NotifyChannel).where(NotifyChannel.name == payload.name, NotifyChannel.id != channel_id)
+    )
+    if exists:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="通知通道名称已存在")
+
+    channel.name = payload.name
+    channel.channel_type = payload.channel_type
+    channel.endpoint = payload.endpoint
+    if payload.secret is not None:
+        channel.secret = payload.secret
+    channel.is_enabled = payload.is_enabled
+    db.commit()
+    db.refresh(channel)
+    return channel
+
+
+@router.delete("/channels/{channel_id}")
+def delete_channel(
+    channel_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_template_manager),
+):
+    channel = _get_channel_or_404(db, channel_id)
+    policy_count = db.scalar(
+        select(func.count(NotifyPolicy.id)).where(NotifyPolicy.channel_id == channel_id)
+    ) or 0
+    if policy_count:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="通知通道已被策略引用，无法删除")
+    db.delete(channel)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/policies", response_model=list[NotifyPolicyResponse])
@@ -101,3 +157,40 @@ def create_policy(
     db.commit()
     db.refresh(item)
     return item
+
+
+@router.put("/policies/{policy_id}", response_model=NotifyPolicyResponse)
+def update_policy(
+    policy_id: int,
+    payload: NotifyPolicyUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(require_template_manager),
+):
+    policy = _get_policy_or_404(db, policy_id)
+    exists = db.scalar(
+        select(NotifyPolicy).where(NotifyPolicy.name == payload.name, NotifyPolicy.id != policy_id)
+    )
+    if exists:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="策略名称已存在")
+    channel = _get_channel_or_404(db, payload.channel_id)
+
+    policy.name = payload.name
+    policy.channel_id = channel.id
+    policy.min_alarm_level = payload.min_alarm_level
+    policy.event_types = payload.event_types
+    policy.is_enabled = payload.is_enabled
+    db.commit()
+    db.refresh(policy)
+    return policy
+
+
+@router.delete("/policies/{policy_id}")
+def delete_policy(
+    policy_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_template_manager),
+):
+    policy = _get_policy_or_404(db, policy_id)
+    db.delete(policy)
+    db.commit()
+    return {"ok": True}

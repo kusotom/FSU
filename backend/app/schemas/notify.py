@@ -151,3 +151,11 @@ class NotifyPolicyResponse(BaseModel):
 
 class NotifyChannelTestRequest(BaseModel):
     content: str | None = None
+
+
+class NotifyChannelUpdate(NotifyChannelCreate):
+    pass
+
+
+class NotifyPolicyUpdate(NotifyPolicyCreate):
+    pass

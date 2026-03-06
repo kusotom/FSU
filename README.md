@@ -515,6 +515,11 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 重要告警可通过策略路由到短信通道（由策略 `min_alarm_level` 控制）。
   - 支持腾讯云短信 API（TC3-HMAC-SHA256）签名发送与错误码解析。
   - 支持短信通道测试发送（复用 `POST /notify/channels/{id}/test`）。
+- 通知模块管理闭环补全：
+  - 新增通知通道编辑、启停、删除接口。
+  - 新增通知策略编辑、启停、删除接口。
+  - 删除被策略引用的通道时增加保护，避免产生悬空策略。
+  - 前端通知页已补齐编辑、启停、删除、测试交互。
 
 - TimescaleDB 默认启用：
   - 新增配置项 `TIMESCALEDB_AUTO_ENABLE`（默认 `true`）。
