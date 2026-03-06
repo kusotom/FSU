@@ -220,6 +220,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 ### 7.7 通知与报表
 
 - `GET /notify/channels`、`POST /notify/channels`：通知通道管理（模板管理权限）。
+- `POST /notify/channels/{id}/test`：通知通道测试发送（模板管理权限）。
 - `GET /notify/policies`、`POST /notify/policies`：通知策略管理（模板管理权限）。
 - `GET /reports/alarm-summary`：告警统计报表（按权限裁剪）。
 
@@ -483,6 +484,15 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 ## 15. 最近改动说明（2026-03-06）
 
 本次已完成并验证的改动：
+
+- 版本升级到 `v0.2.0`：
+  - 后端默认版本号更新为 `0.2.0`。
+  - 前端 `package.json` 版本更新为 `0.2.0`。
+- 企业微信群机器人告警推送（v0.2 第一版）：
+  - 通知通道新增企业微信机器人地址规则校验（必须包含 `key`）。
+  - 推送结果判定支持企业微信 `errcode/errmsg` 解析，不再仅依赖 HTTP 状态码。
+  - 新增 `POST /notify/channels/{id}/test` 测试接口。
+  - 通知策略页面新增“通道测试”按钮与测试消息输入。
 
 - TimescaleDB 默认启用：
   - 新增配置项 `TIMESCALEDB_AUTO_ENABLE`（默认 `true`）。

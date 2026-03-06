@@ -24,8 +24,18 @@
               </el-select>
             </el-form-item>
             <el-form-item label="地址">
-              <el-input v-model="channelForm.endpoint" placeholder="https://..." />
+              <el-input v-model="channelForm.endpoint" :placeholder="endpointPlaceholder" />
             </el-form-item>
+            <el-form-item label="测试消息">
+              <el-input v-model="channelTestContent" placeholder="留空则使用默认测试文案" />
+            </el-form-item>
+            <el-alert
+              v-if="channelForm.channel_type === 'wechat_robot'"
+              type="info"
+              :closable="false"
+              show-icon
+              title="企业微信机器人地址示例：https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx"
+            />
           </el-form>
 
           <el-table :data="channels" size="small" stripe>
@@ -36,6 +46,13 @@
             </el-table-column>
             <el-table-column prop="is_enabled" label="启用" width="90">
               <template #default="{ row }">{{ row.is_enabled ? "是" : "否" }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="110">
+              <template #default="{ row }">
+                <el-button size="small" :loading="testingChannelId === row.id" @click="testChannel(row)">
+                  测试
+                </el-button>
+              </template>
             </el-table-column>
           </el-table>
         </el-card>
@@ -97,13 +114,15 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import AppShell from "../components/AppShell.vue";
 import http from "../api/http";
 
 const channels = ref([]);
 const policies = ref([]);
+const testingChannelId = ref(null);
+const channelTestContent = ref("");
 
 const channelForm = reactive({
   name: "",
@@ -134,6 +153,12 @@ const eventTypeLabelMap = {
   ack: "确认",
   close: "关闭",
 };
+
+const endpointPlaceholder = computed(() =>
+  channelForm.channel_type === "wechat_robot"
+    ? "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
+    : "https://..."
+);
 
 const channelTypeLabel = (type) => {
   if (type === "wechat_robot") return "企业微信机器人";
@@ -166,13 +191,27 @@ const createChannel = async () => {
     ElMessage.warning("请填写通道名称和地址");
     return;
   }
-  await http.post("/notify/channels", channelForm);
-  ElMessage.success("通道创建成功");
-  channelForm.name = "";
-  channelForm.endpoint = "";
-  channelForm.secret = "";
-  channelForm.is_enabled = true;
-  await loadData();
+  if (channelForm.channel_type === "wechat_robot") {
+    const endpoint = String(channelForm.endpoint || "");
+    if (
+      !endpoint.startsWith("https://qyapi.weixin.qq.com/cgi-bin/webhook/send") ||
+      !endpoint.includes("key=")
+    ) {
+      ElMessage.warning("企业微信机器人地址格式不正确");
+      return;
+    }
+  }
+  try {
+    await http.post("/notify/channels", channelForm);
+    ElMessage.success("通道创建成功");
+    channelForm.name = "";
+    channelForm.endpoint = "";
+    channelForm.secret = "";
+    channelForm.is_enabled = true;
+    await loadData();
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || "通道创建失败");
+  }
 };
 
 const createPolicy = async () => {
@@ -184,20 +223,39 @@ const createPolicy = async () => {
     ElMessage.warning("请至少选择一种事件类型");
     return;
   }
-  await http.post("/notify/policies", {
-    name: policyForm.name,
-    channel_id: policyForm.channel_id,
-    min_alarm_level: policyForm.min_alarm_level,
-    event_types: policyForm.event_type_list.join(","),
-    is_enabled: policyForm.is_enabled,
-  });
-  ElMessage.success("策略创建成功");
-  policyForm.name = "";
-  policyForm.channel_id = null;
-  policyForm.min_alarm_level = 2;
-  policyForm.event_type_list = ["trigger", "recover"];
-  policyForm.is_enabled = true;
-  await loadData();
+  try {
+    await http.post("/notify/policies", {
+      name: policyForm.name,
+      channel_id: policyForm.channel_id,
+      min_alarm_level: policyForm.min_alarm_level,
+      event_types: policyForm.event_type_list.join(","),
+      is_enabled: policyForm.is_enabled,
+    });
+    ElMessage.success("策略创建成功");
+    policyForm.name = "";
+    policyForm.channel_id = null;
+    policyForm.min_alarm_level = 2;
+    policyForm.event_type_list = ["trigger", "recover"];
+    policyForm.is_enabled = true;
+    await loadData();
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || "策略创建失败");
+  }
+};
+
+const testChannel = async (row) => {
+  testingChannelId.value = row.id;
+  try {
+    const payload = {};
+    const content = String(channelTestContent.value || "").trim();
+    if (content) payload.content = content;
+    const res = await http.post(`/notify/channels/${row.id}/test`, payload);
+    ElMessage.success(res?.data?.detail || "测试发送成功");
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || "测试发送失败");
+  } finally {
+    testingChannelId.value = null;
+  }
 };
 
 onMounted(async () => {

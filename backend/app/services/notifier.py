@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+import asyncio
 
 import httpx
 from sqlalchemy import select
@@ -29,15 +30,49 @@ def _event_allowed(event_types: str, event_type: str) -> bool:
     return event_type in allowed
 
 
-async def _post_json(url: str, payload: dict) -> tuple[bool, str]:
+def _trim_text(value: str, limit: int = 1800) -> str:
+    if len(value) <= limit:
+        return value
+    return f"{value[: limit - 12]}...(已截断)"
+
+
+def _parse_wechat_robot_result(resp: httpx.Response) -> tuple[bool, str]:
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(url, json=payload)
-        if 200 <= resp.status_code < 300:
-            return True, f"HTTP {resp.status_code}"
-        return False, f"HTTP {resp.status_code}: {resp.text[:180]}"
-    except Exception as exc:
-        return False, str(exc)
+        data = resp.json()
+    except Exception:
+        return False, f"HTTP {resp.status_code}: 非JSON响应"
+    errcode = data.get("errcode")
+    errmsg = str(data.get("errmsg", "")).strip()
+    if errcode in (0, "0", None):
+        return True, f"HTTP {resp.status_code}: ok"
+    return False, f"HTTP {resp.status_code}: errcode={errcode} errmsg={errmsg or '-'}"
+
+
+async def _post_json(url: str, payload: dict, *, channel_type: str) -> tuple[bool, str]:
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(url, json=payload)
+
+            if channel_type == "wechat_robot":
+                success, detail = _parse_wechat_robot_result(resp)
+                if success:
+                    return True, detail
+                return False, detail
+
+            if 200 <= resp.status_code < 300:
+                return True, f"HTTP {resp.status_code}"
+            if resp.status_code >= 500 and attempt < max_retries:
+                await asyncio.sleep(0.2 * (attempt + 1))
+                continue
+            return False, f"HTTP {resp.status_code}: {resp.text[:180]}"
+        except Exception as exc:
+            if attempt < max_retries:
+                await asyncio.sleep(0.2 * (attempt + 1))
+                continue
+            return False, str(exc)
+    return False, "未知错误"
 
 
 def _webhook_payload(
@@ -88,7 +123,18 @@ def _wechat_robot_payload(
         f"\u89e6\u53d1\u503c: {alarm.trigger_value}\n"
         f"\u5185\u5bb9: {alarm.content}"
     )
-    return {"msgtype": "text", "text": {"content": text}}
+    return {"msgtype": "text", "text": {"content": _trim_text(text)}}
+
+
+def _channel_test_payload(channel_type: str, content: str) -> dict:
+    if channel_type == "wechat_robot":
+        return {"msgtype": "text", "text": {"content": _trim_text(content)}}
+    return {"event_type": "test", "message": content}
+
+
+async def send_channel_test_message(channel: NotifyChannel, content: str) -> tuple[bool, str]:
+    payload = _channel_test_payload(channel.channel_type, content)
+    return await _post_json(channel.endpoint, payload, channel_type=channel.channel_type)
 
 
 async def dispatch_alarm_notifications(
@@ -122,7 +168,7 @@ async def dispatch_alarm_notifications(
         else:
             payload = _webhook_payload(event_type, alarm, site, device, point)
 
-        success, detail = await _post_json(channel.endpoint, payload)
+        success, detail = await _post_json(channel.endpoint, payload, channel_type=channel.channel_type)
         results.append(
             {
                 "policy": policy.name,
