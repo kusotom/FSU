@@ -45,6 +45,7 @@
 - 基础表结构检查（`AUTO_CREATE_SCHEMA=true` 时）。
 - TimescaleDB 扩展与时序策略启用（`TIMESCALEDB_AUTO_ENABLE=true` 时，默认开启）。
 - 内置角色与默认账号初始化。
+- 内置角色权限与默认数据范围初始化。
 - 默认规则与示例站点数据初始化。
 - 关键索引检查（PostgreSQL）。
 
@@ -61,7 +62,7 @@ fsu-platform/
       models/              # ORM 模型
       schemas/             # Pydantic 入参与返回模型
     scripts/               # 压测/回归/模拟数据脚本
-    sql/                   # PostgreSQL 初始化 SQL
+    sql/                   # PostgreSQL 初始化 SQL（含 authz seed）
   frontend/                # Vue 前端
     src/views/             # 页面（实时监控、告警、规则、用户管理等）
     src/stores/            # Pinia 状态（登录态、权限）
@@ -82,12 +83,20 @@ fsu-platform/
 - 集团/总部角色可跨租户查看汇总与模板，但不直接改子公司生产策略。
 - 管理员保留全局运维能力（用于平台治理和应急）。
 
-### 4.2 内置角色
+### 4.2 当前权限实现
 
-- `admin`：平台管理员（全局读写）。
-- `hq_noc`：总部监控组（跨租户查看 + 模板治理）。
-- `sub_noc`：子公司监控组（仅本租户范围内管理）。
-- `operator`：基础运维角色（可与 `hq_noc` / `sub_noc` 组合使用）。
+当前版本已切换为“角色权限 + 数据范围”驱动：
+- 角色负责功能权限，权限点统一由后端判定。
+- 数据范围负责可见租户、站点、区域，不再依赖前端硬编码角色名判断。
+- 旧内置角色 `admin / hq_noc / sub_noc / operator` 仍保留，但主要作为默认权限模板。
+
+当前默认权限点包括：
+- 页面访问：`dashboard.view`、`realtime.view`、`site.view`、`alarm.view`、`history.view`
+- 告警动作：`alarm.ack`、`alarm.close`
+- 规则治理：`alarm_rule.template.view/manage`、`alarm_rule.tenant.view/manage`
+- 通知治理：`notify.channel.view/manage`、`notify.policy.view/manage`
+- 站点治理：`site.create`、`site.update`
+- 账号治理：`user.view`、`user.manage`
 
 ### 4.3 权限边界矩阵
 
@@ -123,6 +132,10 @@ pip install -r requirements.txt
 
 # （可选）如果你希望显式执行迁移
 python -m alembic upgrade head
+
+# （可选）如果你使用 init SQL 初始化 PostgreSQL，再执行权限 seed
+psql -f .\sql\init_postgres.sql
+psql -f .\sql\authz_seed.sql
 
 # 启动服务
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -174,7 +187,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 ### 7.1 认证与会话
 
 - `POST /auth/login`：登录获取 JWT。
-- `GET /auth/me`：获取当前用户、角色、租户范围。
+- `GET /auth/me`：获取当前用户、角色、权限点、数据范围、角色绑定。
 - `WS /ws/realtime?token=JWT`：实时推送通道。
 
 ### 7.2 租户与站点
@@ -219,9 +232,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 
 ### 7.7 通知与报表
 
-- `GET /notify/channels`、`POST /notify/channels`：通知通道管理（模板管理权限）。
-- `POST /notify/channels/{id}/test`：通知通道测试发送（模板管理权限）。
-- `GET /notify/policies`、`POST /notify/policies`：通知策略管理（模板管理权限）。
+- `GET /notify/channels`：查看通知通道（`notify.channel.view`）。
+- `POST /notify/channels`：创建通知通道（`notify.channel.manage`）。
+- `POST /notify/channels/{id}/test`：测试通知通道（`notify.channel.manage`）。
+- `GET /notify/policies`：查看通知策略（`notify.policy.view`）。
+- `POST /notify/policies`：创建通知策略（`notify.policy.manage`）。
 - `GET /reports/alarm-summary`：告警统计报表（按权限裁剪）。
 
 说明：
@@ -386,6 +401,9 @@ cd C:\Users\Administrator\Desktop\fsu-platform\backend
 # 全量监控项回归（登录 + 采集 + 告警 + 查询）
 python scripts\test_all_metrics.py --base-url http://127.0.0.1:8000 --username admin --password admin123
 
+# 权限回归（/auth/me + authz + 站点/通知/告警细粒度权限）
+python scripts\test_authz_permissions.py
+
 # 10分钟、15秒间隔采集回归
 python scripts\test_ingest_10min_15s.py --base-url http://127.0.0.1:8000 --interval-seconds 15 --duration-minutes 10
 
@@ -520,6 +538,20 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 新增通知策略编辑、启停、删除接口。
   - 删除被策略引用的通道时增加保护，避免产生悬空策略。
   - 前端通知页已补齐编辑、启停、删除、测试交互。
+- 权限系统第一阶段重构：
+  - 后端访问上下文统一聚合 `roles / permissions / scopes / role_bindings`。
+  - `GET /auth/me` 已返回权限点和数据范围，前端不再依赖角色名硬编码。
+  - 前端 `auth store`、路由守卫、主导航已切换为 permission 驱动。
+  - 站点页、通知页、实时监控关键项配置已改为按权限点控制。
+- 权限系统第二阶段重构：
+  - 新增 `authz` 路由，支持角色权限绑定和用户数据范围绑定。
+  - 用户管理页已重做为“角色权限 + 数据范围”交互，不再围绕租户角色拼装逻辑。
+  - 告警、规则、实时监控、历史查询接口已切换为 permission 驱动。
+- 权限系统第三阶段收口：
+  - 告警动作权限已细化为 `alarm.ack` / `alarm.close`。
+  - 站点治理权限已细化为 `site.create` / `site.update`。
+  - 通知治理权限已细化为 `notify.channel.*` / `notify.policy.*`。
+  - 保留旧键 `alarm.view`、`site.manage`、`notify.view`、`notify.manage` 的兼容映射，避免升级时现网角色立刻失效。
 
 - TimescaleDB 默认启用：
   - 新增配置项 `TIMESCALEDB_AUTO_ENABLE`（默认 `true`）。
@@ -534,3 +566,6 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 - 运行链路回归：
   - 已执行 `backend/scripts/test_all_metrics.py`，结果 `PASS`。
   - 覆盖登录、采集、实时最新值、历史查询、告警触发/恢复主链路。
+  - 已执行 `backend/scripts/test_authz_permissions.py`，结果 `PASS`。
+  - 覆盖 `/auth/me`、角色权限绑定、用户数据范围绑定、站点/通知/告警细粒度权限拦截。
+

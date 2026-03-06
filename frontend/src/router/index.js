@@ -13,14 +13,18 @@ const AlarmRulesView = () => import("../views/AlarmRulesView.vue");
 const routes = [
   { path: "/login", component: LoginView },
   { path: "/", redirect: "/dashboard" },
-  { path: "/dashboard", component: DashboardView, meta: { auth: true } },
-  { path: "/realtime", component: RealtimeView, meta: { auth: true } },
-  { path: "/sites-manage", component: SitesView, meta: { auth: true } },
-  { path: "/alarms", component: AlarmsView, meta: { auth: true } },
-  { path: "/history", component: HistoryView, meta: { auth: true } },
-  { path: "/alarm-rules", component: AlarmRulesView, meta: { auth: true } },
-  { path: "/users", component: UsersView, meta: { auth: true, adminOnly: true } },
-  { path: "/notify", component: NotifyView, meta: { auth: true, templateOnly: true } },
+  { path: "/dashboard", component: DashboardView, meta: { auth: true, permission: "dashboard.view" } },
+  { path: "/realtime", component: RealtimeView, meta: { auth: true, permission: "realtime.view" } },
+  { path: "/sites-manage", component: SitesView, meta: { auth: true, permission: "site.view" } },
+  { path: "/alarms", component: AlarmsView, meta: { auth: true, permission: "alarm.view" } },
+  { path: "/history", component: HistoryView, meta: { auth: true, permission: "history.view" } },
+  {
+    path: "/alarm-rules",
+    component: AlarmRulesView,
+    meta: { auth: true, anyPermissions: ["alarm_rule.template.view", "alarm_rule.tenant.view"] },
+  },
+  { path: "/users", component: UsersView, meta: { auth: true, permission: "user.view" } },
+  { path: "/notify", component: NotifyView, meta: { auth: true, anyPermissions: ["notify.channel.view", "notify.policy.view"] } },
 ];
 
 const router = createRouter({
@@ -31,27 +35,26 @@ const router = createRouter({
 router.beforeEach((to, _from, next) => {
   const token = localStorage.getItem("fsu_token");
   const rawUser = localStorage.getItem("fsu_user");
-  let isAdmin = false;
-  let isTemplateManager = false;
+  let permissions = [];
+
   if (rawUser) {
     try {
       const user = JSON.parse(rawUser);
-      isAdmin = Boolean(user?.roles?.includes("admin"));
-      isTemplateManager = Boolean(user?.roles?.includes("admin") || user?.roles?.includes("hq_noc"));
+      permissions = Array.isArray(user?.permissions) ? user.permissions : [];
     } catch (_e) {
-      isAdmin = false;
-      isTemplateManager = false;
+      permissions = [];
     }
   }
+
   if (to.meta.auth && !token) {
     next("/login");
     return;
   }
-  if (to.meta.adminOnly && !isAdmin) {
+  if (to.meta.permission && !permissions.includes(to.meta.permission)) {
     next("/dashboard");
     return;
   }
-  if (to.meta.templateOnly && !isTemplateManager) {
+  if (Array.isArray(to.meta.anyPermissions) && !to.meta.anyPermissions.some((item) => permissions.includes(item))) {
     next("/dashboard");
     return;
   }

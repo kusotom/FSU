@@ -39,6 +39,7 @@
       <el-table-column label="操作" width="180">
         <template #default="{ row }">
           <el-button
+            v-if="canAck"
             size="small"
             @click="ack(row)"
             :loading="actionLoadingId === row.id"
@@ -47,6 +48,7 @@
             确认
           </el-button>
           <el-button
+            v-if="canClose"
             size="small"
             type="danger"
             @click="closeAlarm(row)"
@@ -75,10 +77,15 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import AppShell from "../components/AppShell.vue";
 import http from "../api/http";
+import { useAuthStore } from "../stores/auth";
+
+const auth = useAuthStore();
+const canAck = computed(() => auth.hasPermission("alarm.ack"));
+const canClose = computed(() => auth.hasPermission("alarm.close"));
 
 const rows = ref([]);
 const filterStatus = ref("");
@@ -146,8 +153,7 @@ const metricNameZh = (name) => metricNameMap[name] || name || "监控项";
 
 const alarmNameLabel = (row) => {
   if (alarmNameMap[row.alarm_code]) return alarmNameMap[row.alarm_code];
-  if (row.alarm_name === "FSU heartbeat timeout" || row.alarm_name === "设备心跳超时")
-    return "设备心跳超时";
+  if (row.alarm_name === "FSU heartbeat timeout" || row.alarm_name === "设备心跳超时") return "设备心跳超时";
   return row.alarm_name || "未命名告警";
 };
 
@@ -163,16 +169,12 @@ const alarmContentLabel = (row) => {
   if (!text) return "-";
   if (text.includes("触发规则") || text.includes("设备心跳超时")) return text;
 
-  let matched = text.match(
-    /^FSU heartbeat stale:\s*device=([^\s]+)\s+last_seen=([^\s]+)\s+threshold_minutes=([\d.]+)/i,
-  );
+  let matched = text.match(/^FSU heartbeat stale:\s*device=([^\s]+)\s+last_seen=([^\s]+)\s+threshold_minutes=([\d.]+)/i);
   if (matched) {
     return `设备心跳超时：设备 ${matched[1]}，最后心跳 ${parseTimeText(matched[2])}，阈值 ${matched[3]} 分钟`;
   }
 
-  matched = text.match(
-    /^(.+?)\s+rule=([^\s]+)\s+value=([-\d.]+)\s+comparison=([^\s]+)\s+threshold=([-\d.]+)/i,
-  );
+  matched = text.match(/^(.+?)\s+rule=([^\s]+)\s+value=([-\d.]+)\s+comparison=([^\s]+)\s+threshold=([-\d.]+)/i);
   if (matched) {
     const metric = metricNameZh(matched[1]);
     const comparison = comparisonMap[matched[4]] || matched[4];
@@ -265,6 +267,10 @@ const handlePageSizeChange = async (nextSize) => {
 };
 
 const ack = async (row) => {
+  if (!canAck.value) {
+    ElMessage.error("无权确认告警");
+    return;
+  }
   actionLoadingId.value = row.id;
   try {
     await http.post(`/alarms/${row.id}/ack`);
@@ -278,6 +284,10 @@ const ack = async (row) => {
 };
 
 const closeAlarm = async (row) => {
+  if (!canClose.value) {
+    ElMessage.error("无权关闭告警");
+    return;
+  }
   actionLoadingId.value = row.id;
   try {
     await http.post(`/alarms/${row.id}/close`);

@@ -4,6 +4,8 @@ from app.api.routes import (
     alarm_rules,
     alarms,
     auth,
+    authz_roles,
+    authz_users,
     ingest,
     notify,
     reports,
@@ -15,6 +17,8 @@ from app.api.routes import (
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
+api_router.include_router(authz_roles.router)
+api_router.include_router(authz_users.router)
 api_router.include_router(tenants.router)
 api_router.include_router(sites.router)
 api_router.include_router(ingest.router)

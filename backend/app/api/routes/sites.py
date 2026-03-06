@@ -1,10 +1,11 @@
-from datetime import datetime, timezone
+﻿from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_access_context, get_current_user
+from app.api.deps import get_access_context
+from app.api.deps_authz import permission_required
 from app.db.session import get_db
 from app.models.site import Site
 from app.models.tenant import Tenant, TenantSiteBinding
@@ -22,8 +23,7 @@ router = APIRouter(prefix="/sites", tags=["sites"])
 @router.get("")
 def list_sites(
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-    access: AccessContext = Depends(get_access_context),
+    access: AccessContext = Depends(permission_required("site.view")),
 ):
     site_ids = get_accessible_site_ids(db, access)
     if site_ids is not None and not site_ids:
@@ -72,7 +72,7 @@ def _resolve_create_target_tenant(
     if tenant_code:
         tenant = db.scalar(select(Tenant).where(Tenant.code == tenant_code))
         if tenant is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="\u79df\u6237\u4e0d\u5b58\u5728")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="租户不存在")
     else:
         tenant = None
 
@@ -82,15 +82,15 @@ def _resolve_create_target_tenant(
         return tenant
 
     if not access.tenant_ids:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="\u65e0\u53ef\u7528\u79df\u6237\u8303\u56f4")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无可用租户范围")
 
     if tenant is None:
         if len(access.tenant_ids) == 1:
             tenant = db.get(Tenant, next(iter(access.tenant_ids)))
         else:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="\u8bf7\u6307\u5b9a\u79df\u6237")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请指定租户")
     if tenant is None or tenant.id not in access.tenant_ids:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="\u65e0\u6743\u5728\u8be5\u79df\u6237\u521b\u5efa\u7ad9\u70b9")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权在该租户创建站点")
     return tenant
 
 
@@ -98,15 +98,11 @@ def _resolve_create_target_tenant(
 def create_site(
     payload: SiteCreate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-    access: AccessContext = Depends(get_access_context),
+    access: AccessContext = Depends(permission_required("site.create")),
 ):
-    if not access.can_manage_tenant_assets:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="\u65e0\u6743\u521b\u5efa\u7ad9\u70b9")
-
     exists = db.scalar(select(Site).where(Site.code == payload.code))
     if exists:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="\u7ad9\u70b9\u7f16\u7801\u5df2\u5b58\u5728")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="站点编码已存在")
 
     tenant = _resolve_create_target_tenant(db, access, payload.tenant_code)
     site = Site(
@@ -136,35 +132,31 @@ def update_site(
     site_id: int,
     payload: SiteUpdate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-    access: AccessContext = Depends(get_access_context),
+    access: AccessContext = Depends(permission_required("site.update")),
 ):
-    if not access.can_manage_tenant_assets:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="\u65e0\u6743\u7f16\u8f91\u7ad9\u70b9")
-
     site = db.get(Site, site_id)
     if site is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="\u7ad9\u70b9\u4e0d\u5b58\u5728")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="站点不存在")
 
     scoped_ids = get_accessible_site_ids(db, access)
     if scoped_ids is not None and site_id not in scoped_ids:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="\u65e0\u6743\u7f16\u8f91\u8be5\u7ad9\u70b9")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权编辑该站点")
 
     payload_fields = payload.model_fields_set
 
     if "code" in payload_fields:
         next_code = (payload.code or "").strip()
         if not next_code:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="\u7ad9\u70b9\u7f16\u7801\u4e0d\u80fd\u4e3a\u7a7a")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="站点编码不能为空")
         exists = db.scalar(select(Site).where(Site.code == next_code, Site.id != site_id))
         if exists:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="\u7ad9\u70b9\u7f16\u7801\u5df2\u5b58\u5728")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="站点编码已存在")
         site.code = next_code
 
     if "name" in payload_fields:
         next_name = (payload.name or "").strip()
         if not next_name:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="\u7ad9\u70b9\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="站点名称不能为空")
         site.name = next_name
 
     if "region" in payload_fields:

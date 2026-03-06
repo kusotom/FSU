@@ -90,6 +90,30 @@ create table if not exists sys_user_role (
   primary key(user_id, role_id)
 );
 
+create table if not exists sys_role_permission (
+  id bigserial primary key,
+  role_id bigint not null references sys_role(id),
+  permission_key varchar(64) not null,
+  constraint uq_role_permission_key unique (role_id, permission_key)
+);
+
+create index if not exists ix_sys_role_permission_role_id on sys_role_permission(role_id);
+create index if not exists ix_sys_role_permission_permission_key on sys_role_permission(permission_key);
+
+create table if not exists sys_user_data_scope (
+  id bigserial primary key,
+  user_id bigint not null references sys_user(id),
+  scope_type varchar(32) not null,
+  scope_value varchar(128) not null,
+  scope_name varchar(255),
+  created_at timestamptz not null default now(),
+  constraint uq_user_data_scope unique (user_id, scope_type, scope_value)
+);
+
+create index if not exists ix_sys_user_data_scope_user_id on sys_user_data_scope(user_id);
+create index if not exists ix_sys_user_data_scope_scope_type on sys_user_data_scope(scope_type);
+create index if not exists ix_sys_user_data_scope_scope_value on sys_user_data_scope(scope_value);
+
 create table if not exists alarm_event (
   id bigserial primary key,
   site_id bigint not null references site(id),

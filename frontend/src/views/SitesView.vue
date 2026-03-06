@@ -1,10 +1,10 @@
-<template>
+﻿<template>
   <AppShell>
     <div class="bar">
       <h2>站点管理</h2>
       <div class="actions">
         <el-button @click="loadData">刷新</el-button>
-        <el-button v-if="canManage" type="primary" @click="openCreate">新建站点</el-button>
+        <el-button v-if="canCreate" type="primary" @click="openCreate">新建站点</el-button>
       </div>
     </div>
 
@@ -36,7 +36,7 @@
       <el-table-column label="创建时间" min-width="180">
         <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column v-if="canManage" label="操作" width="120">
+      <el-table-column v-if="canUpdate" label="操作" width="120">
         <template #default="{ row }">
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
         </template>
@@ -52,7 +52,7 @@
           <el-input v-model="form.name" placeholder="例如：A公司-北京机房1" />
         </el-form-item>
         <el-form-item label="区域" prop="region">
-          <el-input v-model="form.region" placeholder="例如：北京" />
+          <el-input v-model="form.region" placeholder="例如：华北" />
         </el-form-item>
         <el-form-item label="租户" prop="tenant_code">
           <el-select v-model="form.tenant_code" filterable clearable placeholder="请选择租户" style="width: 100%">
@@ -84,7 +84,8 @@ import http from "../api/http";
 import { useAuthStore } from "../stores/auth";
 
 const auth = useAuthStore();
-const canManage = computed(() => auth.canManageTenantAssets);
+const canCreate = computed(() => auth.hasPermission("site.create"));
+const canUpdate = computed(() => auth.hasPermission("site.update"));
 
 const rows = ref([]);
 const tenants = ref([]);
@@ -106,7 +107,7 @@ const form = reactive({
 const rules = {
   code: [
     { required: true, message: "请输入站点编码", trigger: "blur" },
-    { min: 2, max: 64, message: "站点编码长度需在2-64位", trigger: "blur" },
+    { min: 2, max: 64, message: "站点编码长度需在 2-64 位", trigger: "blur" },
   ],
   name: [{ required: true, message: "请输入站点名称", trigger: "blur" }],
   tenant_code: [{ required: true, message: "请选择租户", trigger: "change" }],
@@ -160,11 +161,19 @@ const resetForm = () => {
 };
 
 const openCreate = () => {
+  if (!canCreate.value) {
+    ElMessage.error("无权创建站点");
+    return;
+  }
   resetForm();
   dialogVisible.value = true;
 };
 
 const openEdit = (row) => {
+  if (!canUpdate.value) {
+    ElMessage.error("无权编辑站点");
+    return;
+  }
   editingId.value = row.id;
   form.code = row.code || "";
   form.name = row.name || "";
@@ -175,8 +184,12 @@ const openEdit = (row) => {
 };
 
 const submitSite = async () => {
-  if (!canManage.value) {
+  if (editingId.value && !canUpdate.value) {
     ElMessage.error("无权编辑站点");
+    return;
+  }
+  if (!editingId.value && !canCreate.value) {
+    ElMessage.error("无权创建站点");
     return;
   }
   const ok = await formRef.value?.validate().catch(() => false);

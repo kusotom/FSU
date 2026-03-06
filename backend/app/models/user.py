@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Table
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -33,6 +33,12 @@ class User(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    data_scopes: Mapped[list["UserDataScope"]] = relationship(
+        "UserDataScope",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
 
 class Role(Base):
@@ -50,3 +56,40 @@ class Role(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    permissions: Mapped[list["RolePermission"]] = relationship(
+        "RolePermission",
+        back_populates="role",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+
+class RolePermission(Base):
+    __tablename__ = "sys_role_permission"
+    __table_args__ = (
+        UniqueConstraint("role_id", "permission_key", name="uq_role_permission_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    role_id: Mapped[int] = mapped_column(ForeignKey("sys_role.id"), nullable=False, index=True)
+    permission_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+
+    role: Mapped[Role] = relationship("Role", back_populates="permissions", lazy="joined")
+
+
+class UserDataScope(Base):
+    __tablename__ = "sys_user_data_scope"
+    __table_args__ = (
+        UniqueConstraint("user_id", "scope_type", "scope_value", name="uq_user_data_scope"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("sys_user.id"), nullable=False, index=True)
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    scope_value: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    scope_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="data_scopes", lazy="joined")

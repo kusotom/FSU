@@ -1,7 +1,7 @@
 ﻿<template>
   <AppShell>
     <div class="bar">
-      <h2>通知策略（管理员）</h2>
+      <h2>通知策略</h2>
     </div>
 
     <el-row :gutter="16">
@@ -10,7 +10,7 @@
           <template #header>
             <div class="card-title">
               <span>通知通道</span>
-              <div class="actions">
+              <div v-if="canManageChannels" class="actions">
                 <el-button v-if="editingChannelId" size="small" @click="resetChannelForm">取消</el-button>
                 <el-button size="small" type="primary" @click="submitChannel">
                   {{ editingChannelId ? "保存" : "新增" }}
@@ -18,7 +18,8 @@
               </div>
             </div>
           </template>
-          <el-form :model="channelForm" label-width="92px" class="inline-form">
+
+          <el-form v-if="canManageChannels" :model="channelForm" label-width="92px" class="inline-form">
             <el-form-item label="名称">
               <el-input v-model="channelForm.name" placeholder="例如：主群机器人" />
             </el-form-item>
@@ -51,7 +52,7 @@
             />
           </el-form>
 
-          <el-table :data="channels" size="small" stripe>
+          <el-table v-if="canViewChannels" :data="channels" size="small" stripe>
             <el-table-column prop="id" label="编号" width="70" />
             <el-table-column prop="name" label="名称" />
             <el-table-column label="类型" width="130">
@@ -60,7 +61,7 @@
             <el-table-column prop="is_enabled" label="启用" width="90">
               <template #default="{ row }">{{ row.is_enabled ? "是" : "否" }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="110">
+            <el-table-column v-if="canManageChannels" label="操作" width="160">
               <template #default="{ row }">
                 <div class="row-actions">
                   <el-button size="small" text @click="editChannel(row)">编辑</el-button>
@@ -75,6 +76,7 @@
               </template>
             </el-table-column>
           </el-table>
+          <el-empty v-else description="当前账号无通知通道查看权限" />
         </el-card>
       </el-col>
 
@@ -83,7 +85,7 @@
           <template #header>
             <div class="card-title">
               <span>通知策略</span>
-              <div class="actions">
+              <div v-if="canManagePolicies" class="actions">
                 <el-button v-if="editingPolicyId" size="small" @click="resetPolicyForm">取消</el-button>
                 <el-button size="small" type="primary" @click="submitPolicy">
                   {{ editingPolicyId ? "保存" : "新增" }}
@@ -91,7 +93,8 @@
               </div>
             </div>
           </template>
-          <el-form :model="policyForm" label-width="92px" class="inline-form">
+
+          <el-form v-if="canManagePolicies" :model="policyForm" label-width="92px" class="inline-form">
             <el-form-item label="策略名称">
               <el-input v-model="policyForm.name" placeholder="例如：一级告警策略" />
             </el-form-item>
@@ -110,18 +113,14 @@
             </el-form-item>
             <el-form-item label="事件类型">
               <el-checkbox-group v-model="policyForm.event_type_list">
-                <el-checkbox-button
-                  v-for="item in eventTypeOptions"
-                  :key="item.value"
-                  :label="item.value"
-                >
+                <el-checkbox-button v-for="item in eventTypeOptions" :key="item.value" :label="item.value">
                   {{ item.label }}
                 </el-checkbox-button>
               </el-checkbox-group>
             </el-form-item>
           </el-form>
 
-          <el-table :data="policies" size="small" stripe>
+          <el-table v-if="canViewPolicies" :data="policies" size="small" stripe>
             <el-table-column prop="id" label="编号" width="70" />
             <el-table-column prop="name" label="策略名称" />
             <el-table-column prop="channel_id" label="通道编号" width="90" />
@@ -134,7 +133,7 @@
             <el-table-column prop="is_enabled" label="启用" width="80">
               <template #default="{ row }">{{ row.is_enabled ? "是" : "否" }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="140">
+            <el-table-column v-if="canManagePolicies" label="操作" width="140">
               <template #default="{ row }">
                 <div class="row-actions">
                   <el-button size="small" text @click="editPolicy(row)">编辑</el-button>
@@ -146,6 +145,7 @@
               </template>
             </el-table-column>
           </el-table>
+          <el-empty v-else description="当前账号无通知策略查看权限" />
         </el-card>
       </el-col>
     </el-row>
@@ -157,13 +157,20 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import AppShell from "../components/AppShell.vue";
 import http from "../api/http";
+import { useAuthStore } from "../stores/auth";
 
+const auth = useAuthStore();
 const channels = ref([]);
 const policies = ref([]);
 const testingChannelId = ref(null);
 const channelTestContent = ref("");
 const editingChannelId = ref(null);
 const editingPolicyId = ref(null);
+
+const canViewChannels = computed(() => auth.hasPermission("notify.channel.view"));
+const canManageChannels = computed(() => auth.hasPermission("notify.channel.manage"));
+const canViewPolicies = computed(() => auth.hasPermission("notify.policy.view"));
+const canManagePolicies = computed(() => auth.hasPermission("notify.policy.manage"));
 
 const channelForm = reactive({
   name: "",
@@ -200,7 +207,7 @@ const endpointPlaceholder = computed(() =>
     ? "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
     : channelForm.channel_type === "sms_tencent"
       ? "+8613800138000,+8613900139000"
-      : "https://..."
+      : "https://...",
 );
 
 const channelTypeLabel = (type) => {
@@ -222,12 +229,21 @@ const eventTypesLabel = (raw) => {
 };
 
 const loadData = async () => {
-  const [channelRes, policyRes] = await Promise.all([
-    http.get("/notify/channels"),
-    http.get("/notify/policies"),
-  ]);
-  channels.value = channelRes.data;
-  policies.value = policyRes.data;
+  const requests = [];
+  if (canViewChannels.value) {
+    requests.push(http.get("/notify/channels"));
+  } else {
+    requests.push(Promise.resolve({ data: [] }));
+  }
+  if (canViewPolicies.value) {
+    requests.push(http.get("/notify/policies"));
+  } else {
+    requests.push(Promise.resolve({ data: [] }));
+  }
+
+  const [channelRes, policyRes] = await Promise.all(requests);
+  channels.value = Array.isArray(channelRes.data) ? channelRes.data : [];
+  policies.value = Array.isArray(policyRes.data) ? policyRes.data : [];
 };
 
 const resetChannelForm = () => {
@@ -249,16 +265,17 @@ const resetPolicyForm = () => {
 };
 
 const submitChannel = async () => {
+  if (!canManageChannels.value) {
+    ElMessage.error("无权管理通知通道");
+    return;
+  }
   if (!channelForm.name || !channelForm.endpoint) {
     ElMessage.warning("请填写通道名称和地址");
     return;
   }
   if (channelForm.channel_type === "wechat_robot") {
     const endpoint = String(channelForm.endpoint || "");
-    if (
-      !endpoint.startsWith("https://qyapi.weixin.qq.com/cgi-bin/webhook/send") ||
-      !endpoint.includes("key=")
-    ) {
+    if (!endpoint.startsWith("https://qyapi.weixin.qq.com/cgi-bin/webhook/send") || !endpoint.includes("key=")) {
       ElMessage.warning("企业微信机器人地址格式不正确");
       return;
     }
@@ -289,11 +306,15 @@ const submitChannel = async () => {
     resetChannelForm();
     await loadData();
   } catch (e) {
-    ElMessage.error(e?.response?.data?.detail || "通道创建失败");
+    ElMessage.error(e?.response?.data?.detail || "通道保存失败");
   }
 };
 
 const submitPolicy = async () => {
+  if (!canManagePolicies.value) {
+    ElMessage.error("无权管理通知策略");
+    return;
+  }
   if (!policyForm.name || !policyForm.channel_id) {
     ElMessage.warning("请填写策略名称并选择通知通道");
     return;
@@ -320,11 +341,12 @@ const submitPolicy = async () => {
     resetPolicyForm();
     await loadData();
   } catch (e) {
-    ElMessage.error(e?.response?.data?.detail || "策略创建失败");
+    ElMessage.error(e?.response?.data?.detail || "策略保存失败");
   }
 };
 
 const editChannel = (row) => {
+  if (!canManageChannels.value) return;
   editingChannelId.value = row.id;
   channelForm.name = row.name;
   channelForm.channel_type = row.channel_type;
@@ -334,6 +356,7 @@ const editChannel = (row) => {
 };
 
 const editPolicy = (row) => {
+  if (!canManagePolicies.value) return;
   editingPolicyId.value = row.id;
   policyForm.name = row.name;
   policyForm.channel_id = row.channel_id;
@@ -346,6 +369,10 @@ const editPolicy = (row) => {
 };
 
 const toggleChannel = async (row) => {
+  if (!canManageChannels.value) {
+    ElMessage.error("无权管理通知通道");
+    return;
+  }
   try {
     await http.put(`/notify/channels/${row.id}`, {
       name: row.name,
@@ -363,6 +390,10 @@ const toggleChannel = async (row) => {
 };
 
 const togglePolicy = async (row) => {
+  if (!canManagePolicies.value) {
+    ElMessage.error("无权管理通知策略");
+    return;
+  }
   try {
     await http.put(`/notify/policies/${row.id}`, {
       name: row.name,
@@ -380,6 +411,10 @@ const togglePolicy = async (row) => {
 };
 
 const removeChannel = async (row) => {
+  if (!canManageChannels.value) {
+    ElMessage.error("无权管理通知通道");
+    return;
+  }
   try {
     await ElMessageBox.confirm(`确认删除通知通道“${row.name}”吗？`, "删除确认", { type: "warning" });
     await http.delete(`/notify/channels/${row.id}`);
@@ -393,6 +428,10 @@ const removeChannel = async (row) => {
 };
 
 const removePolicy = async (row) => {
+  if (!canManagePolicies.value) {
+    ElMessage.error("无权管理通知策略");
+    return;
+  }
   try {
     await ElMessageBox.confirm(`确认删除通知策略“${row.name}”吗？`, "删除确认", { type: "warning" });
     await http.delete(`/notify/policies/${row.id}`);
@@ -406,6 +445,10 @@ const removePolicy = async (row) => {
 };
 
 const testChannel = async (row) => {
+  if (!canManageChannels.value) {
+    ElMessage.error("无权测试通知通道");
+    return;
+  }
   testingChannelId.value = row.id;
   try {
     const payload = {};
@@ -424,7 +467,7 @@ onMounted(async () => {
   try {
     await loadData();
   } catch (_e) {
-    ElMessage.error("加载通知配置失败（需要管理员权限）");
+    ElMessage.error("加载通知配置失败");
   }
 });
 </script>

@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, case, false, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_access_context, get_current_user, require_admin
+from app.api.deps import get_access_context, get_current_user
+from app.api.deps_authz import permission_required
 from app.db.session import get_db
 from app.models.device import FSUDevice, MonitorPoint
 from app.models.rule import AlarmRule
@@ -29,7 +30,7 @@ router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 @router.get("/important-point-keys", response_model=list[str])
 def list_important_point_keys(
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    _=Depends(permission_required("realtime.view")),
 ):
     return get_important_point_keys(db)
 
@@ -38,7 +39,7 @@ def list_important_point_keys(
 def save_important_point_keys(
     payload: ImportantPointKeysUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _=Depends(permission_required("realtime.important.manage")),
 ):
     try:
         return update_important_point_keys(db, payload.point_keys)
@@ -64,8 +65,7 @@ def _ensure_site_visible(db: Session, access: AccessContext, site_code: str) -> 
 def latest(
     site_code: str | None = None,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-    access: AccessContext = Depends(get_access_context),
+    access: AccessContext = Depends(permission_required("realtime.view")),
 ):
     scoped_ids = _get_scoped_site_ids_or_all(db, access)
     if scoped_ids is not None and not scoped_ids:
@@ -109,8 +109,7 @@ def history(
     start: datetime = Query(...),
     end: datetime = Query(...),
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-    access: AccessContext = Depends(get_access_context),
+    access: AccessContext = Depends(permission_required("history.view")),
 ):
     _ensure_site_visible(db, access, site_code)
 
@@ -151,8 +150,7 @@ def history_batch(
     end: datetime = Query(...),
     bucket_minutes: int = Query(1, ge=1, le=60),
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-    access: AccessContext = Depends(get_access_context),
+    access: AccessContext = Depends(permission_required("history.view")),
 ):
     keys = [item.strip() for item in point_keys.split(",") if item.strip()]
     if not keys:
@@ -248,8 +246,7 @@ def history_batch(
 @router.get("/site-overview", response_model=list[TelemetrySiteOverviewItem])
 def site_overview(
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-    access: AccessContext = Depends(get_access_context),
+    access: AccessContext = Depends(permission_required("dashboard.view")),
 ):
     scoped_ids = _get_scoped_site_ids_or_all(db, access)
     if scoped_ids is not None and not scoped_ids:

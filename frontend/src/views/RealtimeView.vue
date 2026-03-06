@@ -178,7 +178,7 @@ import { useAuthStore } from "../stores/auth";
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent]);
 
 const auth = useAuthStore();
-const canEditImportant = computed(() => auth.isAdmin);
+const canEditImportant = computed(() => auth.canEditImportant);
 
 const query = ref("");
 const windowMinutes = ref(10);

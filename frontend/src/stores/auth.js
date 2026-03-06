@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import http from "../api/http";
 
-const parseUser = () => {
+const parseMe = () => {
   const raw = localStorage.getItem("fsu_user");
   if (!raw) return null;
   try {
@@ -14,16 +14,23 @@ const parseUser = () => {
 export const useAuthStore = defineStore("auth", {
   state: () => ({
     token: localStorage.getItem("fsu_token") || "",
-    user: parseUser(),
+    user: parseMe(),
   }),
   getters: {
     isLoggedIn: (state) => Boolean(state.token),
-    isAdmin: (state) => state.user?.roles?.includes("admin"),
-    canManageTenantAssets: (state) =>
-      Boolean(state.user?.roles?.includes("admin") || state.user?.roles?.includes("sub_noc")),
-    isTemplateManager: (state) =>
-      Boolean(state.user?.roles?.includes("admin") || state.user?.roles?.includes("hq_noc")),
+    permissions: (state) => state.user?.permissions || [],
+    scopes: (state) => state.user?.scopes || [],
+    roleBindings: (state) => state.user?.role_bindings || [],
     tenantCodes: (state) => state.user?.tenant_codes || [],
+    hasPermission: (state) => (code) => (state.user?.permissions || []).includes(code),
+    hasAnyPermission: (state) => (codes) => codes.some((code) => (state.user?.permissions || []).includes(code)),
+    isAdmin: (state) => (state.user?.permissions || []).includes("user.manage"),
+    isTemplateManager: (state) =>
+      (state.user?.permissions || []).includes("alarm_rule.template.manage"),
+    canManageTenantAssets: (state) =>
+      ["site.create", "site.update"].some((code) => (state.user?.permissions || []).includes(code)),
+    canEditImportant: (state) =>
+      (state.user?.permissions || []).includes("realtime.important.manage"),
   },
   actions: {
     async login(username, password) {

@@ -8,8 +8,14 @@ from app.models.device import FSUDevice, MonitorPoint
 from app.models.rule import AlarmRule
 from app.models.site import Site
 from app.models.tenant import Tenant, TenantSiteBinding, UserTenantRole
-from app.models.user import Role, User
-from app.services.access_control import DEFAULT_SUB_TENANT_CODE, HQ_TENANT_CODE, ensure_site_tenant_binding
+from app.models.user import Role, RolePermission, User, UserDataScope
+from app.services.access_control import (
+    BUILTIN_ROLE_DEFAULT_PERMISSIONS,
+    DEFAULT_SUB_TENANT_CODE,
+    HQ_TENANT_CODE,
+    ensure_site_tenant_binding,
+    expand_permissions,
+)
 
 DEFAULT_POINTS = [
     ("mains_voltage", "\u5e02\u7535\u7535\u538b", "power", "V", 260.0, 170.0),
@@ -152,6 +158,39 @@ def _ensure_role(db: Session, name: str, description: str) -> Role:
     return item
 
 
+def _sync_role_permissions(db: Session, role: Role, permission_keys: set[str]):
+    permission_keys = expand_permissions(permission_keys)
+    existing = {item.permission_key: item for item in role.permissions}
+    for key in list(existing.keys()):
+        if key not in permission_keys:
+            db.delete(existing[key])
+    for key in sorted(permission_keys):
+        if key in existing:
+            continue
+        db.add(RolePermission(role_id=role.id, permission_key=key))
+
+
+def _set_user_data_scopes(db: Session, user: User, scopes: list[tuple[str, str, str | None]]):
+    existing = {(item.scope_type, item.scope_value): item for item in user.data_scopes}
+    expected = {(scope_type, scope_value) for scope_type, scope_value, _ in scopes}
+    for key, item in existing.items():
+        if key not in expected:
+            db.delete(item)
+    for scope_type, scope_value, scope_name in scopes:
+        item = existing.get((scope_type, scope_value))
+        if item is None:
+            db.add(
+                UserDataScope(
+                    user_id=user.id,
+                    scope_type=scope_type,
+                    scope_value=scope_value,
+                    scope_name=scope_name,
+                )
+            )
+            continue
+        item.scope_name = scope_name
+
+
 def _ensure_user(
     db: Session,
     *,
@@ -211,6 +250,10 @@ def seed_roles_and_admin(db: Session):
     operator_role = _ensure_role(db, "operator", "\u8fd0\u7ef4\u4eba\u5458")
     hq_noc_role = _ensure_role(db, "hq_noc", "\u603b\u90e8\u76d1\u63a7\u7ec4")
     sub_noc_role = _ensure_role(db, "sub_noc", "\u5b50\u516c\u53f8\u76d1\u63a7\u7ec4")
+    _sync_role_permissions(db, admin_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS["admin"])
+    _sync_role_permissions(db, operator_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS["operator"])
+    _sync_role_permissions(db, hq_noc_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS["hq_noc"])
+    _sync_role_permissions(db, sub_noc_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS["sub_noc"])
 
     admin = _ensure_user(
         db,
@@ -223,6 +266,7 @@ def seed_roles_and_admin(db: Session):
     _bind_global_role(admin, hq_noc_role)
     _bind_tenant_role(db, user=admin, role=admin_role, tenant=hq)
     _bind_tenant_role(db, user=admin, role=hq_noc_role, tenant=hq)
+    _set_user_data_scopes(db, admin, [("all", "*", "全部数据")])
 
     hq_noc = _ensure_user(
         db,
@@ -233,6 +277,7 @@ def seed_roles_and_admin(db: Session):
     _bind_global_role(hq_noc, operator_role)
     _bind_global_role(hq_noc, hq_noc_role)
     _bind_tenant_role(db, user=hq_noc, role=hq_noc_role, tenant=hq)
+    _set_user_data_scopes(db, hq_noc, [("all", "*", "全部数据")])
 
     suba_noc = _ensure_user(
         db,
@@ -243,6 +288,7 @@ def seed_roles_and_admin(db: Session):
     _bind_global_role(suba_noc, operator_role)
     _bind_global_role(suba_noc, sub_noc_role)
     _bind_tenant_role(db, user=suba_noc, role=sub_noc_role, tenant=sub_a)
+    _set_user_data_scopes(db, suba_noc, [("tenant", sub_a.code, sub_a.name)])
 
 
 def seed_alarm_rules(db: Session):

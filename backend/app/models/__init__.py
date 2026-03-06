@@ -6,12 +6,14 @@ from app.models.site import Site
 from app.models.tenant import Tenant, TenantSiteBinding, UserTenantRole
 from app.models.telemetry import TelemetryHistory, TelemetryLatest
 from app.models.system_config import SystemConfig
-from app.models.user import Role, User, user_roles
+from app.models.user import Role, RolePermission, User, UserDataScope, user_roles
 
 __all__ = [
     "User",
     "Role",
+    "RolePermission",
     "user_roles",
+    "UserDataScope",
     "Site",
     "Tenant",
     "TenantSiteBinding",

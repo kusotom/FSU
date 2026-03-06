@@ -34,8 +34,9 @@ def me(
         username=user.username,
         full_name=user.full_name,
         roles=sorted(access.role_names),
-        is_admin=access.is_admin,
+        permissions=sorted(access.permissions),
         tenant_codes=sorted(access.tenant_codes),
-        is_hq_noc=access.is_hq_noc,
         tenant_roles=access.tenant_roles,
+        scopes=access.data_scopes,
+        role_bindings=access.role_bindings,
     )

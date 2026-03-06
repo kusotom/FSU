@@ -4,12 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import (
-    get_access_context,
-    require_strategy_manager,
-    require_strategy_viewer,
-    require_template_manager,
-)
+from app.api.deps import get_access_context
+from app.api.deps_authz import any_permission_required, permission_required
 from app.db.session import get_db
 from app.models.rule import AlarmRule, AlarmRuleTenantPolicy
 from app.models.tenant import Tenant
@@ -95,7 +91,7 @@ def _build_policy_response(
 
 
 @router.get("", response_model=list[AlarmRuleResponse])
-def list_alarm_rules(db: Session = Depends(get_db), _=Depends(require_template_manager)):
+def list_alarm_rules(db: Session = Depends(get_db), _=Depends(permission_required("alarm_rule.template.view"))):
     stmt = select(AlarmRule).order_by(AlarmRule.id.desc())
     return list(db.scalars(stmt).all())
 
@@ -104,7 +100,7 @@ def list_alarm_rules(db: Session = Depends(get_db), _=Depends(require_template_m
 def create_alarm_rule(
     payload: AlarmRuleCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_template_manager),
+    _=Depends(permission_required("alarm_rule.template.manage")),
 ):
     exists = db.scalar(select(AlarmRule).where(AlarmRule.rule_key == payload.rule_key))
     if exists:
@@ -125,7 +121,7 @@ def update_alarm_rule(
     rule_id: int,
     payload: AlarmRuleUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_template_manager),
+    _=Depends(permission_required("alarm_rule.template.manage")),
 ):
     item = db.get(AlarmRule, rule_id)
     if item is None:
@@ -146,8 +142,9 @@ def update_alarm_rule(
 def list_tenant_policies(
     tenant_code: str | None = Query(default=None),
     db: Session = Depends(get_db),
-    _=Depends(require_strategy_viewer),
-    access: AccessContext = Depends(get_access_context),
+    access: AccessContext = Depends(
+        any_permission_required(["alarm_rule.template.view", "alarm_rule.tenant.view"])
+    ),
 ):
     tenant = _resolve_strategy_tenant(
         db,
@@ -164,8 +161,9 @@ def update_tenant_policy(
     rule_id: int,
     payload: AlarmRuleTenantPolicyUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_strategy_manager),
-    access: AccessContext = Depends(get_access_context),
+    access: AccessContext = Depends(
+        any_permission_required(["alarm_rule.template.manage", "alarm_rule.tenant.manage"])
+    ),
 ):
     rule = db.get(AlarmRule, rule_id)
     if rule is None:

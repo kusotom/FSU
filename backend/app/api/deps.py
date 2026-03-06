@@ -16,13 +16,13 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(auth_scheme),
 ) -> User:
     if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="\u672a\u767b\u5f55\u6216\u4ee4\u724c\u4e22\u5931")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录或令牌丢失")
     payload = decode_access_token(credentials.credentials)
     if not payload or "sub" not in payload:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="\u4ee4\u724c\u65e0\u6548\u6216\u5df2\u8fc7\u671f")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="令牌无效或已过期")
     user = db.scalar(select(User).where(User.username == payload["sub"]))
     if user is None or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="\u7528\u6237\u4e0d\u53ef\u7528")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不可用")
     return user
 
 
@@ -38,7 +38,7 @@ def require_admin(
     access: AccessContext = Depends(get_access_context),
 ) -> User:
     if not access.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="\u4ec5\u7ba1\u7406\u5458\u53ef\u64cd\u4f5c")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅管理员可操作")
     return user
 
 
@@ -47,7 +47,7 @@ def require_template_manager(
     access: AccessContext = Depends(get_access_context),
 ) -> User:
     if not access.can_manage_templates:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="\u4ec5\u603b\u90e8\u76d1\u63a7\u7ec4\u6216\u7ba1\u7406\u5458\u53ef\u64cd\u4f5c")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅具备模板管理权限的用户可操作")
     return user
 
 
@@ -56,7 +56,7 @@ def require_strategy_manager(
     access: AccessContext = Depends(get_access_context),
 ) -> User:
     if not access.can_edit_tenant_strategy:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅子公司监控组或管理员可操作策略")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅具备策略管理权限的用户可操作")
     return user
 
 
@@ -65,5 +65,5 @@ def require_strategy_viewer(
     access: AccessContext = Depends(get_access_context),
 ) -> User:
     if not access.can_view_tenant_strategy:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅监控组或管理员可查看策略")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅具备策略查看权限的用户可查看")
     return user

@@ -2,14 +2,26 @@
   <div class="shell">
     <aside class="sidebar">
       <div class="logo">动环平台</div>
-      <router-link class="nav-link" to="/dashboard">平台总览</router-link>
-      <router-link class="nav-link" to="/realtime">实时监控</router-link>
-      <router-link class="nav-link" to="/sites-manage">站点管理</router-link>
-      <router-link class="nav-link" to="/alarms">告警中心</router-link>
-      <router-link class="nav-link" to="/history">历史查询</router-link>
-      <router-link class="nav-link" to="/alarm-rules">告警规则/策略</router-link>
-      <router-link v-if="auth.isTemplateManager" class="nav-link" to="/notify">通知策略</router-link>
-      <router-link v-if="auth.isAdmin" class="nav-link" to="/users">用户管理</router-link>
+      <router-link v-if="auth.hasPermission('dashboard.view')" class="nav-link" to="/dashboard">平台总览</router-link>
+      <router-link v-if="auth.hasPermission('realtime.view')" class="nav-link" to="/realtime">实时监控</router-link>
+      <router-link v-if="auth.hasPermission('site.view')" class="nav-link" to="/sites-manage">站点管理</router-link>
+      <router-link v-if="auth.hasPermission('alarm.view')" class="nav-link" to="/alarms">告警中心</router-link>
+      <router-link v-if="auth.hasPermission('history.view')" class="nav-link" to="/history">历史查询</router-link>
+      <router-link
+        v-if="auth.hasAnyPermission(['alarm_rule.template.view', 'alarm_rule.tenant.view'])"
+        class="nav-link"
+        to="/alarm-rules"
+      >
+        告警规则/策略
+      </router-link>
+      <router-link
+        v-if="auth.hasAnyPermission(['notify.channel.view', 'notify.policy.view'])"
+        class="nav-link"
+        to="/notify"
+      >
+        通知策略
+      </router-link>
+      <router-link v-if="auth.hasPermission('user.view')" class="nav-link" to="/users">用户管理</router-link>
     </aside>
     <main class="content">
       <header class="topbar">
