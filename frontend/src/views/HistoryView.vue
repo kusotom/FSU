@@ -91,15 +91,15 @@
     />
 
     <el-table v-else-if="tableRows.length > 0" :data="tableRows" stripe>
-      <el-table-column prop="collected_at" :label="labels.collectedAt" min-width="180" fixed="left" />
+      <el-table-column prop="collected_at_label" :label="labels.collectedAt" min-width="180" fixed="left" />
       <el-table-column
         v-for="item in selectedPointColumns"
         :key="item.point_key"
-        :label="item.display_name"
+        :label="columnLabel(item)"
         min-width="150"
       >
         <template #default="{ row }">
-          {{ formatCellValue(row[item.point_key]) }}
+          {{ formatCellValue(row.values[item.point_key]) }}
         </template>
       </el-table-column>
     </el-table>
@@ -196,13 +196,19 @@ const selectedPointColumns = computed(() => {
 const tableRows = computed(() => {
   const grouped = new Map();
   for (const item of rows.value) {
-    const ts = item.collected_at;
-    if (!grouped.has(ts)) {
-      grouped.set(ts, { collected_at: ts });
+    const rawTs = String(item.collected_at || "");
+    if (!grouped.has(rawTs)) {
+      grouped.set(rawTs, {
+        collected_at: rawTs,
+        collected_at_label: formatDateTime(rawTs),
+        values: {},
+      });
     }
-    grouped.get(ts)[item.point_key] = item.value;
+    grouped.get(rawTs).values[item.point_key] = item.value;
   }
-  return Array.from(grouped.values()).sort((a, b) => String(a.collected_at).localeCompare(String(b.collected_at)));
+  return Array.from(grouped.values()).sort(
+    (a, b) => new Date(a.collected_at).getTime() - new Date(b.collected_at).getTime()
+  );
 });
 
 const normalizeSiteOption = (item) => ({
@@ -251,6 +257,7 @@ const normalizePointOptions = (list) => {
       point_name: String(item?.point_name || "").trim(),
       display_name: resolvePointDisplayName(pointKey, item?.point_name || "", labels.unnamedPoint),
       category: inferPointCategory(pointKey),
+      unit: String(item?.unit || "").trim(),
     });
   }
   return Array.from(map.values()).sort((a, b) => a.display_name.localeCompare(b.display_name));
@@ -347,14 +354,29 @@ const formatCellValue = (value) => {
   return Number.isInteger(num) ? String(num) : num.toFixed(2);
 };
 
+const formatDateTime = (value) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
+  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+};
+
+const columnLabel = (item) => (item.unit ? `${item.display_name}（${item.unit}）` : item.display_name);
+
 const exportCsv = () => {
   if (!tableRows.value.length || !selectedPointColumns.value.length) return;
-  const headers = [labels.collectedAt, ...selectedPointColumns.value.map((item) => item.display_name)];
+  const headers = [labels.collectedAt, ...selectedPointColumns.value.map((item) => columnLabel(item))];
   const lines = [headers];
   for (const row of tableRows.value) {
     lines.push([
-      row.collected_at,
-      ...selectedPointColumns.value.map((item) => formatCellValue(row[item.point_key])),
+      row.collected_at_label,
+      ...selectedPointColumns.value.map((item) => formatCellValue(row.values[item.point_key])),
     ]);
   }
   const csv = `\ufeff${lines

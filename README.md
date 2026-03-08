@@ -669,6 +669,8 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 监控项按“动力监控 / 环境监控 / 智能设备 / 其他”分组展示
   - 支持“全选 / 清空 / 全选本组 / 清空本组”
   - 默认优先勾选后端配置的关键监控项；若当前站点未命中关键项，则回退到站点前 4 个监控项
+  - 采集时间已统一按前端本地时间格式显示，修复原始时间字符串显示异常
+  - 每个监控项栏目已带单位，例如“市电电压（V）”
   - 支持 CSV 导出
 - 已将监控项中文映射抽成前端公共配置：
   - `frontend/src/constants/pointMetadata.js`

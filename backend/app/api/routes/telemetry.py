@@ -114,16 +114,17 @@ def history(
     _ensure_site_visible(db, access, site_code)
 
     point_id_stmt = (
-        select(MonitorPoint.id, MonitorPoint.point_name)
+        select(MonitorPoint.id, MonitorPoint.point_name, MonitorPoint.unit)
         .join(FSUDevice, MonitorPoint.device_id == FSUDevice.id)
         .join(Site, FSUDevice.site_id == Site.id)
         .where(and_(MonitorPoint.point_key == point_key, Site.code == site_code))
     )
     point_rows = db.execute(point_id_stmt).all()
-    point_ids = [point_id for point_id, _point_name in point_rows]
+    point_ids = [point_id for point_id, _point_name, _unit in point_rows]
     if not point_ids:
         return []
-    point_name = next((name for _point_id, name in point_rows if name), point_key)
+    point_name = next((name for _point_id, name, _unit in point_rows if name), point_key)
+    point_unit = next((unit for _point_id, _name, unit in point_rows if unit), None)
 
     stmt = (
         select(TelemetryHistory.value, TelemetryHistory.collected_at)
@@ -139,7 +140,13 @@ def history(
     )
     rows = db.execute(stmt).all()
     return [
-        TelemetryHistoryItem(point_key=point_key, point_name=point_name, value=value, collected_at=collected_at)
+        TelemetryHistoryItem(
+            point_key=point_key,
+            point_name=point_name,
+            unit=point_unit,
+            value=value,
+            collected_at=collected_at,
+        )
         for value, collected_at in rows
     ]
 
@@ -164,6 +171,8 @@ def history_batch(
         raw_stmt = (
             select(
                 MonitorPoint.point_key,
+                MonitorPoint.point_name,
+                MonitorPoint.unit,
                 TelemetryHistory.value,
                 TelemetryHistory.collected_at,
             )
@@ -184,9 +193,15 @@ def history_batch(
         rows = db.execute(raw_stmt).all()
         bucket_seconds = max(bucket_minutes, 1) * 60
         bucket_map: dict[tuple[str, int], dict[str, float | datetime]] = {}
-        for point_key, value, collected_at in rows:
+        point_meta_map: dict[str, dict[str, str | None]] = {}
+        for point_key, point_name, unit, value, collected_at in rows:
             if collected_at is None:
                 continue
+            if point_key not in point_meta_map:
+                point_meta_map[point_key] = {
+                    "point_name": point_name,
+                    "unit": unit,
+                }
             ts = int(collected_at.timestamp())
             bucket = (ts // bucket_seconds) * bucket_seconds
             map_key = (point_key, bucket)
@@ -202,9 +217,12 @@ def history_batch(
 
         result: list[TelemetryHistoryItem] = []
         for (point_key, bucket), item in sorted(bucket_map.items(), key=lambda entry: (entry[0][0], entry[0][1])):
+            meta = point_meta_map.get(point_key, {})
             result.append(
                 TelemetryHistoryItem(
                     point_key=point_key,
+                    point_name=meta.get("point_name"),
+                    unit=meta.get("unit"),
                     value=float(item["sum"]) / max(float(item["count"]), 1.0),
                     collected_at=item["ts"],
                 )
@@ -220,6 +238,8 @@ def history_batch(
     stmt = (
         select(
             MonitorPoint.point_key,
+            MonitorPoint.point_name,
+            MonitorPoint.unit,
             func.avg(TelemetryHistory.value).label("value"),
             bucket_ts,
         )
@@ -234,14 +254,20 @@ def history_batch(
                 TelemetryHistory.collected_at <= end,
             )
         )
-        .group_by(MonitorPoint.point_key, bucket_ts)
+        .group_by(MonitorPoint.point_key, MonitorPoint.point_name, MonitorPoint.unit, bucket_ts)
         .order_by(MonitorPoint.point_key.asc(), bucket_ts.asc())
         .limit(50000)
     )
     rows = db.execute(stmt).all()
     return [
-        TelemetryHistoryItem(point_key=point_key, value=float(value), collected_at=collected_at)
-        for point_key, value, collected_at in rows
+        TelemetryHistoryItem(
+            point_key=point_key,
+            point_name=point_name,
+            unit=unit,
+            value=float(value),
+            collected_at=collected_at,
+        )
+        for point_key, point_name, unit, value, collected_at in rows
     ]
 
 
