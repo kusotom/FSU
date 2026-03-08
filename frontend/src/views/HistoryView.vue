@@ -119,30 +119,30 @@ import {
 } from "../constants/pointMetadata";
 
 const labels = {
-  title: "\u5386\u53f2\u6570\u636e\u67e5\u8be2",
-  subtitle: "\u5148\u68c0\u7d22\u7ad9\u70b9\uff0c\u518d\u52fe\u9009\u9700\u8981\u5c55\u793a\u7684\u76d1\u63a7\u9879\uff0c\u6309\u680f\u76ee\u5bf9\u6bd4\u5386\u53f2\u6570\u636e\u3002",
-  siteSearch: "\u7ad9\u70b9\u68c0\u7d22",
-  sitePlaceholder: "\u8f93\u5165\u7ad9\u70b9\u7f16\u7801\u6216\u7ad9\u70b9\u540d\u79f0",
-  startTime: "\u5f00\u59cb\u65f6\u95f4",
-  endTime: "\u7ed3\u675f\u65f6\u95f4",
-  search: "\u67e5\u8be2",
-  export: "\u5bfc\u51fa",
-  currentSite: "\u5f53\u524d\u7ad9\u70b9\uff1a",
-  pointSectionTitle: "\u76d1\u63a7\u9879\u9009\u62e9",
-  pointSectionTip: "\u7ad9\u70b9\u9009\u4e2d\u540e\u518d\u52fe\u9009\u9700\u8981\u5c55\u793a\u7684\u76d1\u63a7\u9879\uff0c\u6700\u591a\u540c\u65f6\u5bf9\u6bd4 12 \u9879\u3002",
-  pointFilterPlaceholder: "\u641c\u7d22\u76d1\u63a7\u9879",
-  selectAll: "\u5168\u9009",
-  clearAll: "\u6e05\u7a7a",
-  selectGroup: "\u5168\u9009\u672c\u7ec4",
-  clearGroup: "\u6e05\u7a7a\u672c\u7ec4",
-  collectedAt: "\u91c7\u96c6\u65f6\u95f4",
-  chooseSiteFirst: "\u8bf7\u5148\u9009\u62e9\u7ad9\u70b9",
-  choosePointFirst: "\u8bf7\u81f3\u5c11\u52fe\u9009\u4e00\u4e2a\u76d1\u63a7\u9879",
-  searchFailed: "\u67e5\u8be2\u5931\u8d25",
-  initFailed: "\u521d\u59cb\u5316\u5386\u53f2\u67e5\u8be2\u5931\u8d25",
-  unnamedPoint: "\u672a\u547d\u540d\u76d1\u63a7\u9879",
-  emptySiteHint: "\u8bf7\u5148\u68c0\u7d22\u5e76\u9009\u62e9\u7ad9\u70b9",
-  emptyResultHint: "\u5f53\u524d\u6761\u4ef6\u4e0b\u6682\u65e0\u5386\u53f2\u6570\u636e",
+  title: "历史数据查询",
+  subtitle: "先检索站点，再勾选要展示的监控项，按栏目对比历史数据。",
+  siteSearch: "站点检索",
+  sitePlaceholder: "输入站点编码或站点名称",
+  startTime: "开始时间",
+  endTime: "结束时间",
+  search: "查询",
+  export: "导出",
+  currentSite: "当前站点：",
+  pointSectionTitle: "监控项选择",
+  pointSectionTip: "默认优先勾选关键监控项，最多同时对比 12 项。",
+  pointFilterPlaceholder: "搜索监控项",
+  selectAll: "全选",
+  clearAll: "清空",
+  selectGroup: "全选本组",
+  clearGroup: "清空本组",
+  collectedAt: "采集时间",
+  chooseSiteFirst: "请先选择站点",
+  choosePointFirst: "请至少勾选一个监控项",
+  searchFailed: "查询失败",
+  initFailed: "初始化历史查询失败",
+  unnamedPoint: "未命名监控项",
+  emptySiteHint: "请先检索并选择站点",
+  emptyResultHint: "当前条件下暂无历史数据",
 };
 
 const now = new Date();
@@ -162,11 +162,12 @@ const pointOptions = ref([]);
 const pointOptionsLoading = ref(false);
 const pointKeyword = ref("");
 const hasSearched = ref(false);
+const importantPointKeys = ref([]);
 
 const selectedSiteLabel = computed(() => {
   const site = siteOptions.value.find((item) => item.code === form.site_code);
   if (!site) return form.site_code || "";
-  return `${site.name}\uff08${site.code}\uff09`;
+  return `${site.name}（${site.code}）`;
 });
 
 const filteredPointOptions = computed(() => {
@@ -177,15 +178,15 @@ const filteredPointOptions = computed(() => {
   );
 });
 
-const filteredPointGroups = computed(() => {
-  return pointCategoryOrder
+const filteredPointGroups = computed(() =>
+  pointCategoryOrder
     .map((key) => ({
       key,
       label: pointCategoryLabelMap[key] || labels.unnamedPoint,
       options: filteredPointOptions.value.filter((item) => item.category === key),
     }))
-    .filter((item) => item.options.length > 0);
-});
+    .filter((item) => item.options.length > 0)
+);
 
 const selectedPointColumns = computed(() => {
   const selectedSet = new Set(form.point_keys);
@@ -207,7 +208,7 @@ const tableRows = computed(() => {
 const normalizeSiteOption = (item) => ({
   code: String(item?.code || "").trim(),
   name: String(item?.name || item?.code || "").trim(),
-  label: `${String(item?.name || item?.code || "").trim()}\uff08${String(item?.code || "").trim()}\uff09`,
+  label: `${String(item?.name || item?.code || "").trim()}（${String(item?.code || "").trim()}）`,
 });
 
 const querySiteSuggestions = (queryString, cb) => {
@@ -287,6 +288,13 @@ const loadSites = async () => {
   siteOptions.value = list.map(normalizeSiteOption).filter((item) => item.code);
 };
 
+const loadImportantPointKeys = async () => {
+  const res = await http.get("/telemetry/important-point-keys");
+  importantPointKeys.value = Array.isArray(res.data)
+    ? res.data.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+};
+
 const loadPointOptions = async (siteCode) => {
   if (!siteCode) {
     pointOptions.value = [];
@@ -297,7 +305,9 @@ const loadPointOptions = async (siteCode) => {
   try {
     const res = await http.get("/telemetry/latest", { params: { site_code: siteCode } });
     pointOptions.value = normalizePointOptions(Array.isArray(res.data) ? res.data : []);
-    form.point_keys = pointOptions.value.slice(0, 4).map((item) => item.point_key);
+    const availableKeys = new Set(pointOptions.value.map((item) => item.point_key));
+    const defaults = importantPointKeys.value.filter((item) => availableKeys.has(item)).slice(0, 12);
+    form.point_keys = defaults.length ? defaults : pointOptions.value.slice(0, 4).map((item) => item.point_key);
     rows.value = [];
     hasSearched.value = false;
   } finally {
@@ -362,6 +372,7 @@ const exportCsv = () => {
 onMounted(async () => {
   try {
     await loadSites();
+    await loadImportantPointKeys();
   } catch (_e) {
     ElMessage.error(labels.initFailed);
   }
@@ -425,16 +436,6 @@ onMounted(async () => {
   gap: 8px;
 }
 
-.point-checks {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px 12px;
-}
-
-.point-check {
-  margin-right: 0;
-}
-
 .point-groups {
   display: flex;
   flex-direction: column;
@@ -463,6 +464,16 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.point-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px 12px;
+}
+
+.point-check {
+  margin-right: 0;
 }
 
 .page-empty {
