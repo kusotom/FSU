@@ -26,7 +26,11 @@
       </div>
     </div>
 
-    <div v-if="siteCards.length === 0" class="empty">
+    <div v-if="initialLoading" class="empty">
+      <el-skeleton :rows="6" animated />
+    </div>
+
+    <div v-else-if="siteCards.length === 0" class="empty">
       <el-empty description="暂无站点数据" />
     </div>
 
@@ -201,6 +205,7 @@ const seriesStore = new Map();
 const latestValueStore = new Map();
 const uiTick = ref(0);
 const chartTick = ref(0);
+const initialLoading = ref(true);
 const siteMetaLoadedAt = ref(0);
 const siteOverviewLoadedAt = ref(0);
 const trendVisibleMap = ref({});
@@ -1314,11 +1319,18 @@ const buildChartOption = (metric) => {
 };
 
 const loadData = async (force = false) => {
-  await loadSiteOverview(force);
-  loadSites(force).catch(() => {});
+  await Promise.allSettled([loadSiteOverview(force), loadSites(force)]);
   if (expandedSite.value) {
     await loadSiteData(expandedSite.value, true);
   }
+};
+
+const ensureInitialSitesReady = async () => {
+  await loadImportantPointKeys();
+  await loadData(true);
+  if (allSites.value.length > 0) return;
+  await new Promise((resolve) => window.setTimeout(resolve, 400));
+  await loadData(true);
 };
 
 const refreshExpandedSite = async () => {
@@ -1404,10 +1416,12 @@ const connectWS = () => {
 
 onMounted(async () => {
   try {
-    await loadImportantPointKeys();
-    await loadData();
+    initialLoading.value = true;
+    await ensureInitialSitesReady();
   } catch (_e) {
     ElMessage.error("站点数据加载失败");
+  } finally {
+    initialLoading.value = false;
   }
   startContinuousGenerator();
   connectWS();
