@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_access_context, get_current_user
+from app.api.deps import get_access_context, get_current_user, require_admin
 from app.db.session import get_db
 from app.models.tenant import Tenant
-from app.schemas.tenant import TenantResponse
+from app.schemas.tenant import TenantCreate, TenantResponse
 from app.services.access_control import AccessContext
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
@@ -45,3 +47,53 @@ def list_tenants(
             )
         )
     return result
+
+
+@router.post("", response_model=TenantResponse)
+def create_tenant(
+    payload: TenantCreate,
+    db: Session = Depends(get_db),
+    _=Depends(require_admin),
+):
+    code = str(payload.code or "").strip().upper()
+    name = str(payload.name or "").strip()
+    tenant_type = str(payload.tenant_type or "").strip() or "subsidiary"
+    if not code:
+      raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="公司编码不能为空")
+    if not name:
+      raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="公司名称不能为空")
+
+    exists = db.scalar(select(Tenant).where(Tenant.code == code))
+    if exists is not None:
+      raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="公司编码已存在")
+
+    parent_id = None
+    if payload.parent_code:
+      parent = db.scalar(select(Tenant).where(Tenant.code == payload.parent_code))
+      if parent is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上级公司不存在")
+      parent_id = parent.id
+
+    tenant = Tenant(
+      code=code,
+      name=name,
+      tenant_type=tenant_type,
+      parent_id=parent_id,
+      is_active=True,
+      created_at=datetime.now(timezone.utc),
+    )
+    db.add(tenant)
+    db.commit()
+    db.refresh(tenant)
+    parent_code = None
+    if tenant.parent_id:
+      parent_code = db.scalar(select(Tenant.code).where(Tenant.id == tenant.parent_id))
+    return TenantResponse(
+      id=tenant.id,
+      code=tenant.code,
+      name=tenant.name,
+      tenant_type=tenant.tenant_type,
+      parent_code=parent_code,
+      is_active=tenant.is_active,
+      created_at=tenant.created_at,
+    )

@@ -371,6 +371,22 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify-free-stack-local.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\stop-free-stack-local.ps1
 ```
 
+Windows 常驻启动：
+
+```powershell
+# 安装当前用户登录自启动任务
+powershell -ExecutionPolicy Bypass -File .\scripts\install-services.ps1
+
+# 卸载自启动任务
+powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-services.ps1
+```
+
+- `install-services.ps1` 现在使用“计划任务”在当前用户登录后自动拉起前后端。
+- 不再使用 `sc.exe create` 伪装 Windows Service；`uvicorn` 和 `vite preview` 在这台机器上用计划任务更稳定。
+- 默认端口：
+  - 前端：`http://localhost:5173`
+  - 后端：`http://127.0.0.1:8000`
+
 ### 10.2 常用地址
 
 - Backend：`http://127.0.0.1:8000`
@@ -403,6 +419,12 @@ python scripts\test_all_metrics.py --base-url http://127.0.0.1:8000 --username a
 
 # 权限回归（/auth/me + authz + 站点/通知/告警细粒度权限）
 python scripts\test_authz_permissions.py
+
+# 公司中心资源回归（项目 / 设备组 / 自定义范围 CRUD + 公司管理员权限边界）
+python scripts\test_company_scope_resources.py
+
+# 公司中心批量创建员工（如需手动验证，可在页面内使用“批量创建”入口）
+# 当前批量入口默认绑定当前公司范围，复杂范围请创建后单独编辑
 
 # 10分钟、15秒间隔采集回归
 python scripts\test_ingest_10min_15s.py --base-url http://127.0.0.1:8000 --interval-seconds 15 --duration-minutes 10
@@ -568,4 +590,91 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 覆盖登录、采集、实时最新值、历史查询、告警触发/恢复主链路。
   - 已执行 `backend/scripts/test_authz_permissions.py`，结果 `PASS`。
   - 覆盖 `/auth/me`、角色权限绑定、用户数据范围绑定、站点/通知/告警细粒度权限拦截。
+  - 已执行 `backend/scripts/test_company_scope_resources.py`，结果 `PASS`。
+  - 覆盖公司管理员对项目、设备组、自定义范围的 CRUD，以及总部用户越权拦截。
+  - 同时覆盖公司员工批量创建与“不能分配平台级角色”的边界校验。
+  - 同时覆盖批量创建结果统计与最小审计记录落库。
 
+
+### 15.6 公司用户数据范围扩展（2026-03-07）
+- 用户管理页的数据范围从“公司 / 站点 / 区域”扩展为“公司 / 项目 / 站点 / 设备组 / 自定义范围”。
+- 后端新增接口：
+  - `GET /api/v1/projects?tenant_code=...`
+  - `GET /api/v1/device-groups?tenant_code=...`
+  - `GET|POST|PUT|DELETE /api/v1/custom-scope-sets?tenant_code=...`
+- 后端权限上下文新增识别：`project`、`device_group`、`custom` 三类范围。
+- 前端 `用户管理` 页面已支持为员工配置上述范围类型，并会按当前公司动态加载选项。
+- 公司详情新增“自定义范围”页签，可直接维护站点集合并供员工授权复用。
+- 公司详情新增“项目 / 设备组”维护能力，可直接创建、编辑、删除这两类授权资源。
+- 后端新增项目、设备组 CRUD：
+  - `GET|POST /api/v1/projects?tenant_code=...`
+  - `PUT|DELETE /api/v1/projects/{id}?tenant_code=...`
+  - `GET|POST /api/v1/device-groups?tenant_code=...`
+  - `PUT|DELETE /api/v1/device-groups/{id}?tenant_code=...`
+- 公司详情“员工”页签新增“批量创建”，支持按当前公司一次性创建多名普通员工。
+- 批量创建改为“部分成功”模式：
+  - 后端会逐条返回成功/失败结果
+  - 前端会弹出明细，方便管理员定位哪一行有问题
+- 公司详情新增“操作记录”页签：
+  - 可直接查看当前公司的用户、项目、设备组和自定义范围操作轨迹
+  - 后端新增 `GET /api/v1/operation-logs?tenant_code=...`
+  - 支持按动作、操作人、日期范围筛选
+  - 前端支持本地分页浏览
+  - 后端新增 `GET /api/v1/operation-logs/export?tenant_code=...` 导出 CSV
+- 操作记录已独立为权限点 `audit.view`
+  - 当前保留 `user.view -> audit.view` 的兼容映射，避免现有角色升级时立刻失效
+- 员工“批量创建”新增模板下载入口，管理员可直接下载文本模板后录入
+- 员工“批量创建”新增重复账号处理策略：
+  - 跳过已存在账号
+  - 只更新姓名
+  - 更新姓名并重置密码
+  - 当前版本不会覆盖既有角色和数据范围
+- `/users` 主链路已加租户边界校验：
+  - 公司管理员只能看到本公司账号
+  - 公司管理员不能给员工分配 `admin / hq_noc`
+  - 公司管理员不能借接口把用户创建到其他公司
+- 新增最小审计记录：
+  - 新表 `sys_operation_log`
+  - 当前已记录项目、设备组、自定义范围，以及单个/批量用户创建相关操作
+- `backend/scripts/test_company_scope_resources.py` 现已覆盖：
+  - `GET /api/v1/operation-logs?tenant_code=...`
+  - `GET /api/v1/operation-logs/export?tenant_code=...`
+  - 审计日志查询结果包含预期动作
+- 默认示例数据会自动补齐：
+  - `PROJ-001 / A公司示例项目`
+  - `DG-001 / 核心设备组`
+  - `默认重点站点` 自定义范围
+- 升级后需重启一次后端，让 `project / device_group / custom_scope_*` 新表自动创建。
+
+### 15.7 监控项中文映射与遗留心跳点清理（2026-03-08）
+- 已补齐历史查询页和实时监控页对在用监控项的中文映射，覆盖了空调、油机、电池、整流器、设备组别名等实际使用中的英文 key。
+- 当前在用监控项已完成映射核对，不再存在“仍在使用但没有中文映射”的监控项 key。
+- 新增维护脚本：
+  - `backend/scripts/cleanup_stale_heartbeat_points.py`
+- 该脚本用于清理 `system:fsu_heartbeat_timeout` 的遗留监控点，并采用保守策略：
+  - 仅删除“无实时值、无历史值、无告警事件引用”的点
+  - 同步删除对应的 `alarm_condition_state`
+  - 保留仍被 `alarm_event` 引用的点，避免破坏告警链路
+- 本次已实际执行清理：
+  - 删除 `10` 条未使用心跳超时监控点
+  - 删除 `10` 条对应状态记录
+  - 当前库内仅保留 `1` 条仍被告警事件引用的心跳超时监控点
+
+### 15.8 历史查询二级筛选与监控项巡检（2026-03-08）
+- 历史数据查询页已改成二级交互：
+  - 第一步只检索站点
+  - 第二步按分类勾选监控项
+  - 查询结果按“采集时间 + 多监控项栏目”展示
+- 历史查询页新增能力：
+  - 监控项按“动力监控 / 环境监控 / 智能设备 / 其他”分组展示
+  - 支持“全选 / 清空 / 全选本组 / 清空本组”
+  - 支持 CSV 导出
+- 已将监控项中文映射抽成前端公共配置：
+  - `frontend/src/constants/pointMetadata.js`
+  - 历史查询页与实时监控页共用同一份映射和分类逻辑，避免两处维护不一致
+- 新增巡检脚本：
+  - `backend/scripts/audit_unnamed_points.py`
+  - 用于扫描库中“未命名监控项”，区分在用项与未使用项
+- 当前巡检结果：
+  - `unknown_count=0`
+  - 说明本轮补映射与遗留心跳点清理后，当前库里已没有未命名监控项

@@ -66,6 +66,7 @@ def main() -> int:
             "notify.channel.manage",
             "notify.policy.view",
             "notify.policy.manage",
+            "audit.view",
         ]:
             require(key in permission_keys, f"missing permission option: {key}")
 

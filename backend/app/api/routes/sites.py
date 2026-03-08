@@ -22,6 +22,7 @@ router = APIRouter(prefix="/sites", tags=["sites"])
 
 @router.get("")
 def list_sites(
+    tenant_code: str | None = None,
     db: Session = Depends(get_db),
     access: AccessContext = Depends(permission_required("site.view")),
 ):
@@ -43,6 +44,8 @@ def list_sites(
         .outerjoin(Tenant, Tenant.id == TenantSiteBinding.tenant_id)
         .order_by(Site.id.desc())
     )
+    if tenant_code:
+        stmt = stmt.where(Tenant.code == tenant_code)
     if site_ids is not None:
         stmt = stmt.where(Site.id.in_(site_ids))
     rows = db.execute(stmt).all()

@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.custom_scope import CustomScopeItem, CustomScopeSet
+from app.models.device_group import DeviceGroup
+from app.models.project import Project
 from app.models.site import Site
 from app.models.tenant import Tenant, TenantSiteBinding, UserTenantRole
 from app.models.user import Role, User, UserDataScope
@@ -36,14 +39,18 @@ PERMISSION_DEFINITIONS: list[PermissionOption] = [
     PermissionOption(key="notify.policy.manage", label="管理通知策略", description="创建、编辑、删除通知策略"),
     PermissionOption(key="user.view", label="查看账号", description="查看用户、角色与数据范围"),
     PermissionOption(key="user.manage", label="管理账号", description="管理用户、角色与数据范围"),
+    PermissionOption(key="audit.view", label="查看操作记录", description="查看公司级操作审计记录"),
 ]
 PERMISSION_KEY_SET = {item.key for item in PERMISSION_DEFINITIONS}
 
 SCOPE_TYPE_DEFINITIONS: list[PermissionOption] = [
     PermissionOption(key="all", label="全部数据", description="可查看所有租户、站点和设备数据"),
-    PermissionOption(key="tenant", label="按租户", description="按租户控制可见数据"),
+    PermissionOption(key="tenant", label="按公司", description="按公司控制可见数据"),
+    PermissionOption(key="project", label="按项目", description="按项目控制可见数据"),
     PermissionOption(key="site", label="按站点", description="只允许查看指定站点"),
+    PermissionOption(key="device_group", label="按设备组", description="只允许查看指定设备组"),
     PermissionOption(key="region", label="按区域", description="按区域控制站点可见范围"),
+    PermissionOption(key="custom", label="按自定义范围", description="按自定义站点集合控制可见范围"),
 ]
 SCOPE_TYPE_SET = {item.key for item in SCOPE_TYPE_DEFINITIONS}
 
@@ -64,6 +71,7 @@ BUILTIN_ROLE_DEFAULT_PERMISSIONS: dict[str, set[str]] = {
         "notify.channel.manage",
         "notify.policy.view",
         "notify.policy.manage",
+        "audit.view",
     },
     "sub_noc": {
         "dashboard.view",
@@ -79,12 +87,16 @@ BUILTIN_ROLE_DEFAULT_PERMISSIONS: dict[str, set[str]] = {
         "alarm_rule.tenant.view",
         "notify.channel.view",
         "notify.policy.view",
+        "user.view",
+        "user.manage",
+        "audit.view",
     },
 }
 
 PERMISSION_ALIASES: dict[str, set[str]] = {
     "alarm.view": {"alarm.ack", "alarm.close"},
     "site.manage": {"site.create", "site.update"},
+    "user.view": {"audit.view"},
     "notify.view": {"notify.channel.view", "notify.policy.view"},
     "notify.manage": {
         "notify.channel.view",
@@ -100,8 +112,12 @@ class ScopeSet:
     has_all: bool = False
     tenant_ids: set[int] = field(default_factory=set)
     tenant_codes: set[str] = field(default_factory=set)
+    project_ids: set[int] = field(default_factory=set)
+    project_codes: set[str] = field(default_factory=set)
     site_ids: set[int] = field(default_factory=set)
     site_codes: set[str] = field(default_factory=set)
+    device_group_ids: set[int] = field(default_factory=set)
+    custom_scope_set_ids: set[int] = field(default_factory=set)
     regions: set[str] = field(default_factory=set)
 
 
@@ -128,12 +144,28 @@ class AccessContext:
         return self.scopes.tenant_codes
 
     @property
+    def project_ids(self) -> set[int]:
+        return self.scopes.project_ids
+
+    @property
+    def project_codes(self) -> set[str]:
+        return self.scopes.project_codes
+
+    @property
     def site_ids(self) -> set[int]:
         return self.scopes.site_ids
 
     @property
     def site_codes(self) -> set[str]:
         return self.scopes.site_codes
+
+    @property
+    def device_group_ids(self) -> set[int]:
+        return self.scopes.device_group_ids
+
+    @property
+    def custom_scope_set_ids(self) -> set[int]:
+        return self.scopes.custom_scope_set_ids
 
     @property
     def regions(self) -> set[str]:
@@ -282,6 +314,7 @@ def build_access_context(db: Session, user: User) -> AccessContext:
         scope_type = row.scope_type
         scope_value = row.scope_value
         scope_name = row.scope_name
+
         if scope_type == "all":
             scope_set.has_all = True
             scope_value = "*"
@@ -292,12 +325,36 @@ def build_access_context(db: Session, user: User) -> AccessContext:
                 scope_set.tenant_ids.add(tenant.id)
                 scope_set.tenant_codes.add(tenant.code)
                 scope_name = scope_name or tenant.name
+        elif scope_type == "project":
+            project = db.scalar(select(Project).where(Project.code == scope_value))
+            if project is not None:
+                scope_set.project_ids.add(project.id)
+                scope_set.project_codes.add(project.code)
+                scope_set.tenant_ids.add(project.tenant_id)
+                scope_name = scope_name or project.name
         elif scope_type == "site":
             site = db.scalar(select(Site).where(Site.code == scope_value))
             if site is not None:
                 scope_set.site_ids.add(site.id)
                 scope_set.site_codes.add(site.code)
                 scope_name = scope_name or site.name
+        elif scope_type == "device_group":
+            device_group = db.scalar(select(DeviceGroup).where(DeviceGroup.code == scope_value))
+            if device_group is not None:
+                scope_set.device_group_ids.add(device_group.id)
+                scope_set.tenant_ids.add(device_group.tenant_id)
+                scope_name = scope_name or device_group.name
+        elif scope_type == "custom":
+            try:
+                custom_scope_id = int(scope_value)
+            except (TypeError, ValueError):
+                custom_scope_id = None
+            if custom_scope_id:
+                custom_scope = db.scalar(select(CustomScopeSet).where(CustomScopeSet.id == custom_scope_id))
+                if custom_scope is not None:
+                    scope_set.custom_scope_set_ids.add(custom_scope.id)
+                    scope_set.tenant_ids.add(custom_scope.tenant_id)
+                    scope_name = scope_name or custom_scope.name
         elif scope_type == "region":
             region = str(scope_value or "").strip()
             if region:
@@ -329,11 +386,32 @@ def get_accessible_site_ids(db: Session, access: AccessContext) -> set[int] | No
         return None
 
     site_ids = set(access.site_ids)
+    if access.project_ids:
+        project_site_ids = db.scalars(
+            select(DeviceGroup.site_id).where(
+                DeviceGroup.project_id.in_(access.project_ids),
+                DeviceGroup.site_id.is_not(None),
+            )
+        ).all()
+        site_ids.update(project_site_ids)
     if access.tenant_ids:
         tenant_site_ids = db.scalars(
             select(TenantSiteBinding.site_id).where(TenantSiteBinding.tenant_id.in_(access.tenant_ids))
         ).all()
         site_ids.update(tenant_site_ids)
+    if access.device_group_ids:
+        device_group_site_ids = db.scalars(
+            select(DeviceGroup.site_id).where(
+                DeviceGroup.id.in_(access.device_group_ids),
+                DeviceGroup.site_id.is_not(None),
+            )
+        ).all()
+        site_ids.update(device_group_site_ids)
+    if access.custom_scope_set_ids:
+        custom_site_ids = db.scalars(
+            select(CustomScopeItem.resource_id).where(CustomScopeItem.scope_set_id.in_(access.custom_scope_set_ids))
+        ).all()
+        site_ids.update(custom_site_ids)
     if access.regions:
         region_site_ids = db.scalars(select(Site.id).where(Site.region.in_(access.regions))).all()
         site_ids.update(region_site_ids)

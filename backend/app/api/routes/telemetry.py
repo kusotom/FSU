@@ -114,14 +114,16 @@ def history(
     _ensure_site_visible(db, access, site_code)
 
     point_id_stmt = (
-        select(MonitorPoint.id)
+        select(MonitorPoint.id, MonitorPoint.point_name)
         .join(FSUDevice, MonitorPoint.device_id == FSUDevice.id)
         .join(Site, FSUDevice.site_id == Site.id)
         .where(and_(MonitorPoint.point_key == point_key, Site.code == site_code))
     )
-    point_ids = list(db.scalars(point_id_stmt).all())
+    point_rows = db.execute(point_id_stmt).all()
+    point_ids = [point_id for point_id, _point_name in point_rows]
     if not point_ids:
         return []
+    point_name = next((name for _point_id, name in point_rows if name), point_key)
 
     stmt = (
         select(TelemetryHistory.value, TelemetryHistory.collected_at)
@@ -137,7 +139,7 @@ def history(
     )
     rows = db.execute(stmt).all()
     return [
-        TelemetryHistoryItem(point_key=point_key, value=value, collected_at=collected_at)
+        TelemetryHistoryItem(point_key=point_key, point_name=point_name, value=value, collected_at=collected_at)
         for value, collected_at in rows
     ]
 

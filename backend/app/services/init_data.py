@@ -4,7 +4,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash
+from app.models.custom_scope import CustomScopeItem, CustomScopeSet
 from app.models.device import FSUDevice, MonitorPoint
+from app.models.device_group import DeviceGroup
+from app.models.project import Project
 from app.models.rule import AlarmRule
 from app.models.site import Site
 from app.models.tenant import Tenant, TenantSiteBinding, UserTenantRole
@@ -334,6 +337,46 @@ def seed_demo_site_data(db: Session):
     # Ensure the binding is visible before querying "unbound" sites below.
     db.flush()
 
+    project = db.scalar(
+        select(Project).where(
+            Project.tenant_id == sub_a.id,
+            Project.code == "PROJ-001",
+        )
+    )
+    if project is None:
+        project = Project(
+            tenant_id=sub_a.id,
+            code="PROJ-001",
+            name="A公司示例项目",
+            status="active",
+        )
+        db.add(project)
+        db.flush()
+    else:
+        project.name = "A公司示例项目"
+        project.status = "active"
+
+    device_group = db.scalar(
+        select(DeviceGroup).where(
+            DeviceGroup.tenant_id == sub_a.id,
+            DeviceGroup.code == "DG-001",
+        )
+    )
+    if device_group is None:
+        device_group = DeviceGroup(
+            tenant_id=sub_a.id,
+            project_id=project.id,
+            site_id=site.id,
+            code="DG-001",
+            name="核心设备组",
+        )
+        db.add(device_group)
+        db.flush()
+    else:
+        device_group.project_id = project.id
+        device_group.site_id = site.id
+        device_group.name = "核心设备组"
+
     device = db.scalar(select(FSUDevice).where(FSUDevice.code == "FSU-001"))
     if device is None:
         device = FSUDevice(
@@ -374,6 +417,34 @@ def seed_demo_site_data(db: Session):
         exists.unit = unit
         exists.high_threshold = high
         exists.low_threshold = low
+
+    admin_user = db.scalar(select(User).where(User.username == "suba_noc"))
+    default_scope = db.scalar(
+        select(CustomScopeSet).where(
+            CustomScopeSet.tenant_id == sub_a.id,
+            CustomScopeSet.name == "默认重点站点",
+        )
+    )
+    if default_scope is None:
+        default_scope = CustomScopeSet(
+            tenant_id=sub_a.id,
+            name="默认重点站点",
+            resource_type="site",
+            created_by=admin_user.id if admin_user else None,
+        )
+        db.add(default_scope)
+        db.flush()
+    else:
+        default_scope.resource_type = "site"
+
+    has_site_item = db.scalar(
+        select(CustomScopeItem).where(
+            CustomScopeItem.scope_set_id == default_scope.id,
+            CustomScopeItem.resource_id == site.id,
+        )
+    )
+    if has_site_item is None:
+        db.add(CustomScopeItem(scope_set_id=default_scope.id, resource_id=site.id))
 
     unbound_site_ids = list(
         db.scalars(

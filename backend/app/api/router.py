@@ -6,8 +6,12 @@ from app.api.routes import (
     auth,
     authz_roles,
     authz_users,
+    custom_scope_sets,
+    device_groups,
     ingest,
     notify,
+    operation_logs,
+    projects,
     reports,
     sites,
     telemetry,
@@ -19,6 +23,10 @@ api_router = APIRouter()
 api_router.include_router(auth.router)
 api_router.include_router(authz_roles.router)
 api_router.include_router(authz_users.router)
+api_router.include_router(projects.router)
+api_router.include_router(device_groups.router)
+api_router.include_router(custom_scope_sets.router)
+api_router.include_router(operation_logs.router)
 api_router.include_router(tenants.router)
 api_router.include_router(sites.router)
 api_router.include_router(ingest.router)

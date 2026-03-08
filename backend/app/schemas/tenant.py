@@ -27,3 +27,10 @@ class UserTenantRoleView(BaseModel):
     tenant_type: str
     role_name: str
     scope_level: str
+
+
+class TenantCreate(BaseModel):
+    code: str
+    name: str
+    tenant_type: str = "subsidiary"
+    parent_code: str | None = None

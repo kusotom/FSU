@@ -35,13 +35,16 @@ const router = createRouter({
 router.beforeEach((to, _from, next) => {
   const token = localStorage.getItem("fsu_token");
   const rawUser = localStorage.getItem("fsu_user");
+  let hasUserPayload = false;
   let permissions = [];
 
   if (rawUser) {
     try {
       const user = JSON.parse(rawUser);
+      hasUserPayload = Boolean(user && typeof user === "object");
       permissions = Array.isArray(user?.permissions) ? user.permissions : [];
     } catch (_e) {
+      hasUserPayload = false;
       permissions = [];
     }
   }
@@ -50,12 +53,18 @@ router.beforeEach((to, _from, next) => {
     next("/login");
     return;
   }
+  if (to.meta.auth && token && !hasUserPayload) {
+    localStorage.removeItem("fsu_token");
+    localStorage.removeItem("fsu_user");
+    next("/login");
+    return;
+  }
   if (to.meta.permission && !permissions.includes(to.meta.permission)) {
-    next("/dashboard");
+    next(to.path === "/dashboard" ? "/login" : "/dashboard");
     return;
   }
   if (Array.isArray(to.meta.anyPermissions) && !to.meta.anyPermissions.some((item) => permissions.includes(item))) {
-    next("/dashboard");
+    next(to.path === "/dashboard" ? "/login" : "/dashboard");
     return;
   }
   next();

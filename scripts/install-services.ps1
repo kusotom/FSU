@@ -4,21 +4,56 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backendBat = Join-Path $scriptDir "run-backend.bat"
 $frontendBat = Join-Path $scriptDir "run-frontend.bat"
 
-foreach ($svc in @("FSUBackend", "FSUFrontend")) {
-  sc.exe stop $svc | Out-Null
-  sc.exe delete $svc | Out-Null
+function Remove-LegacyService {
+  param([string]$Name)
+
+  sc.exe stop $Name | Out-Null
+  sc.exe delete $Name | Out-Null
 }
 
-Write-Host "Installing FSUBackend service..."
-sc.exe create FSUBackend binPath= "cmd /c `"$backendBat`"" start= auto | Out-Null
-sc.exe description FSUBackend "FSU backend API service (FastAPI/Uvicorn)" | Out-Null
+function Remove-Task {
+  param([string]$Name)
 
-Write-Host "Installing FSUFrontend service..."
-sc.exe create FSUFrontend binPath= "cmd /c `"$frontendBat`"" start= auto | Out-Null
-sc.exe description FSUFrontend "FSU frontend preview service (Vite preview)" | Out-Null
+  schtasks.exe /End /TN $Name | Out-Null
+  schtasks.exe /Delete /TN $Name /F | Out-Null
+}
 
-Write-Host "Starting services..."
-sc.exe start FSUBackend | Out-Null
-sc.exe start FSUFrontend | Out-Null
+function New-DaemonTask {
+  param(
+    [string]$Name,
+    [string]$TaskCommand,
+    [string]$Description
+  )
 
-Write-Host "Done. Services: FSUBackend, FSUFrontend"
+  schtasks.exe /Create /TN $Name /SC ONLOGON /RL HIGHEST /TR $TaskCommand /F | Out-Null
+  Write-Host "$Description installed."
+}
+
+foreach ($svc in @("FSUBackend", "FSUFrontend")) {
+  Remove-LegacyService -Name $svc
+}
+
+foreach ($task in @("FSUBackend", "FSUFrontend", "FSUBackendTest")) {
+  Remove-Task -Name $task
+}
+
+if (-not (Test-Path $backendBat)) {
+  throw "Backend launcher not found: $backendBat"
+}
+
+if (-not (Test-Path $frontendBat)) {
+  throw "Frontend launcher not found: $frontendBat"
+}
+
+$backendCommand = "cmd.exe /c `"$backendBat`""
+$frontendCommand = "cmd.exe /c `"$frontendBat`""
+
+Write-Host "Installing startup tasks..."
+New-DaemonTask -Name "FSUBackend" -TaskCommand $backendCommand -Description "FSU backend startup task"
+New-DaemonTask -Name "FSUFrontend" -TaskCommand $frontendCommand -Description "FSU frontend startup task"
+
+Write-Host "Starting tasks..."
+schtasks.exe /Run /TN FSUBackend | Out-Null
+schtasks.exe /Run /TN FSUFrontend | Out-Null
+
+Write-Host "Done. Startup tasks: FSUBackend, FSUFrontend"

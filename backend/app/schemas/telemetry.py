@@ -35,6 +35,7 @@ class TelemetryLatestItem(BaseModel):
 
 class TelemetryHistoryItem(BaseModel):
     point_key: str
+    point_name: str | None = None
     value: float
     collected_at: datetime
 

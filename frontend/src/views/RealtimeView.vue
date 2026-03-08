@@ -174,6 +174,14 @@ import { GridComponent, TooltipComponent, LegendComponent } from "echarts/compon
 import AppShell from "../components/AppShell.vue";
 import http from "../api/http";
 import { useAuthStore } from "../stores/auth";
+import {
+  hasChineseText,
+  inferPointCategory,
+  pointCategoryLabelMap,
+  pointCategoryOrder,
+  pointNameZhMap,
+  resolvePointDisplayName,
+} from "../constants/pointMetadata";
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent]);
 
@@ -251,98 +259,12 @@ const mainsVoltageKeys = new Set(["mains_voltage"]);
 const dcVoltageKeys = new Set(["rectifier_output_voltage", "battery_group_voltage"]);
 const dcCurrentKeys = new Set(["rectifier_output_current", "dc_branch_current"]);
 
-const pointNameZhMap = {
-  mains_voltage: "市电电压",
-  mains_current: "市电电流",
-  mains_frequency: "市电频率",
-  mains_power_state: "市电状态",
-  rectifier_module_status: "整流模块状态",
-  rectifier_output_voltage: "整流输出电压",
-  rectifier_output_current: "整流输出电流",
-  rectifier_load_rate: "整流负载率",
-  rectifier_fault_status: "整流故障状态",
-  battery_group_voltage: "电池组电压",
-  battery_cell_voltage_min: "电池单体最小电压",
-  battery_cell_voltage_max: "电池单体最大电压",
-  battery_temp: "电池温度",
-  battery_fault_status: "电池故障状态",
-  battery_fuse_status: "电池熔丝状态",
-  gen_running_status: "油机运行状态",
-  gen_start_failed: "油机启动失败",
-  gen_fault_status: "油机故障状态",
-  gen_fuel_level: "油机油位",
-  dc_branch_current: "直流支路电流",
-  dc_breaker_status: "空开状态",
-  dc_overcurrent: "直流过流状态",
-  spd_failure: "防雷器失效",
-  room_temp: "机房温度",
-  room_humidity: "机房湿度",
-  water_leak_status: "水浸状态",
-  smoke_status: "烟雾状态",
-  ac_running_status: "空调运行状态",
-  ac_fault_status: "空调故障状态",
-  ac_high_pressure: "空调高压状态",
-  ac_low_pressure: "空调低压状态",
-  ac_comm_status: "空调通信状态",
-  fresh_air_running_status: "新风运行状态",
-  fresh_air_fault_status: "新风故障状态",
-  door_access_status: "门禁状态",
-  camera_online_status: "摄像头在线状态",
-  ups_bypass_status: "UPS旁路状态",
-};
-
 const siteNameZhMap = {
   "Demo Site": "示例站点",
 };
 
-const importantCategoryOrder = ["power", "env", "smart", "other"];
-const importantCategoryLabelMap = {
-  power: "动力监控",
-  env: "环境监控",
-  smart: "智能设备",
-  other: "其他",
-};
-
 const normalizePointKeyList = (items) =>
   Array.from(new Set((items || []).map((item) => String(item || "").trim()).filter(Boolean)));
-
-const hasChineseText = (text) => /[\u4e00-\u9fff]/.test(String(text || ""));
-
-const inferImportantCategoryByKey = (pointKey) => {
-  const key = String(pointKey || "").toLowerCase();
-  if (
-    key.includes("mains") ||
-    key.includes("rectifier") ||
-    key.includes("battery") ||
-    key.startsWith("dc_") ||
-    key.startsWith("gen_") ||
-    key.includes("ups") ||
-    key.includes("spd")
-  ) {
-    return "power";
-  }
-  if (
-    key.includes("temp") ||
-    key.includes("humidity") ||
-    key.includes("water") ||
-    key.includes("smoke") ||
-    key.startsWith("ac_") ||
-    key.startsWith("fresh_air")
-  ) {
-    return "env";
-  }
-  if (key.includes("door") || key.includes("camera")) return "smart";
-  return "other";
-};
-
-const resolvePointDisplayName = (pointKey, pointName = "") => {
-  const key = String(pointKey || "").trim();
-  if (!key) return "未知测点";
-  if (pointNameZhMap[key]) return pointNameZhMap[key];
-  const name = String(pointName || "").trim();
-  if (name && !/^demo/i.test(name)) return name;
-  return `测点（${key}）`;
-};
 
 const rebuildImportantOptions = () => {
   const optionMap = new Map();
@@ -355,23 +277,23 @@ const rebuildImportantOptions = () => {
     optionMap.set(key, {
       key,
       name: displayName,
-      category: category || prev?.category || inferImportantCategoryByKey(key),
+      category: category || prev?.category || inferPointCategory(key),
     });
   };
 
   for (const key of Object.keys(pointNameZhMap)) {
-    upsert(key, pointNameZhMap[key], inferImportantCategoryByKey(key));
+    upsert(key, pointNameZhMap[key], inferPointCategory(key));
   }
   for (const key of defaultImportantPointKeys) {
-    upsert(key, pointNameZhMap[key] || key, inferImportantCategoryByKey(key));
+    upsert(key, pointNameZhMap[key] || key, inferPointCategory(key));
   }
   for (const key of importantPointKeys.value) {
-    upsert(key, pointNameZhMap[key] || key, inferImportantCategoryByKey(key));
+    upsert(key, pointNameZhMap[key] || key, inferPointCategory(key));
   }
 
   for (const rows of siteRowsStore.values()) {
     for (const row of rows || []) {
-      upsert(row.point_key, row.point_name, row.category || inferImportantCategoryByKey(row.point_key));
+      upsert(row.point_key, row.point_name, row.category || inferPointCategory(row.point_key));
     }
   }
 
@@ -649,14 +571,11 @@ const siteCards = computed(() => {
 });
 
 const categoryLabel = (key) => {
-  if (key === "power") return "动力监控";
-  if (key === "env") return "环境监控";
-  if (key === "smart") return "智能设备";
-  return "其他";
+  return pointCategoryLabelMap[key] || "其他";
 };
 
 const displayPointName = (name, key) => {
-  return resolvePointDisplayName(key, name);
+  return resolvePointDisplayName(key, name, "测点（{key}）");
 };
 
 const displaySiteName = (name, code) => {

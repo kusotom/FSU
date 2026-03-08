@@ -1,6 +1,10 @@
 from app.models.notify import NotifyChannel, NotifyPolicy
 from app.models.alarm import AlarmActionLog, AlarmConditionState, AlarmEvent
+from app.models.custom_scope import CustomScopeItem, CustomScopeSet
 from app.models.device import FSUDevice, MonitorPoint
+from app.models.device_group import DeviceGroup
+from app.models.operation_log import OperationLog
+from app.models.project import Project
 from app.models.rule import AlarmRule, AlarmRuleTenantPolicy
 from app.models.site import Site
 from app.models.tenant import Tenant, TenantSiteBinding, UserTenantRole
@@ -30,4 +34,9 @@ __all__ = [
     "AlarmRuleTenantPolicy",
     "NotifyChannel",
     "NotifyPolicy",
+    "OperationLog",
+    "Project",
+    "DeviceGroup",
+    "CustomScopeSet",
+    "CustomScopeItem",
 ]

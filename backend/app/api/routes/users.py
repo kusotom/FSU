@@ -1,20 +1,26 @@
-import re
+﻿import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin
+from app.api.deps import get_current_user, require_admin
+from app.api.deps_authz import get_access_context
 from app.core.security import get_password_hash
 from app.db.session import get_db
+from app.models.custom_scope import CustomScopeSet
+from app.models.device_group import DeviceGroup
+from app.models.project import Project
 from app.models.site import Site
-from app.models.tenant import Tenant, UserTenantRole
+from app.models.tenant import Tenant, TenantSiteBinding, UserTenantRole
 from app.models.user import Role, RolePermission, User, UserDataScope, user_roles
 from app.schemas.tenant import UserTenantRoleAssign, UserTenantRoleView
 from app.schemas.user import (
     RoleDefCreate,
     RoleDefResponse,
     RoleDefUpdate,
+    UserBatchCreate,
+    UserBatchCreateResponse,
     UserCreate,
     UserDataScopeAssign,
     UserDataScopeView,
@@ -23,6 +29,7 @@ from app.schemas.user import (
     UserUpdate,
 )
 from app.services.access_control import (
+    AccessContext,
     BUILTIN_ROLE_DEFAULT_PERMISSIONS,
     HQ_TENANT_CODE,
     PERMISSION_KEY_SET,
@@ -31,6 +38,7 @@ from app.services.access_control import (
     get_role_permissions,
     get_scope_type_options,
 )
+from app.services.operation_log import write_operation_log
 
 router = APIRouter(prefix="/users", tags=["users"])
 BUILTIN_ROLE_NAMES = {"admin", "operator", "hq_noc", "sub_noc"}
@@ -39,7 +47,7 @@ BUILTIN_ROLE_NAMES = {"admin", "operator", "hq_noc", "sub_noc"}
 def _normalize_role_name(value: str) -> str:
     name = value.strip().lower()
     if not name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="角色名称不能为空")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="角色标识不能为空")
     if not re.fullmatch(r"[a-z][a-z0-9_]{1,63}", name):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -86,11 +94,22 @@ def _normalize_user_data_scopes(
         if scope_type == "tenant":
             tenant = db.scalar(select(Tenant).where(Tenant.code == scope_value))
             if tenant is None:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"租户不存在：{scope_value}")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"公司不存在：{scope_value}")
             normalized[(scope_type, tenant.code)] = UserDataScopeView(
                 scope_type=scope_type,
                 scope_value=tenant.code,
                 scope_name=tenant.name,
+            )
+            continue
+
+        if scope_type == "project":
+            project = db.scalar(select(Project).where(Project.code == scope_value))
+            if project is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"项目不存在：{scope_value}")
+            normalized[(scope_type, project.code)] = UserDataScopeView(
+                scope_type=scope_type,
+                scope_value=project.code,
+                scope_name=project.name,
             )
             continue
 
@@ -105,6 +124,17 @@ def _normalize_user_data_scopes(
             )
             continue
 
+        if scope_type == "device_group":
+            device_group = db.scalar(select(DeviceGroup).where(DeviceGroup.code == scope_value))
+            if device_group is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"设备组不存在：{scope_value}")
+            normalized[(scope_type, device_group.code)] = UserDataScopeView(
+                scope_type=scope_type,
+                scope_value=device_group.code,
+                scope_name=device_group.name,
+            )
+            continue
+
         if scope_type == "region":
             region_exists = db.scalar(select(Site.id).where(Site.region == scope_value).limit(1))
             if region_exists is None:
@@ -114,6 +144,21 @@ def _normalize_user_data_scopes(
                 scope_value=scope_value,
                 scope_name=scope_value,
             )
+            continue
+
+        if scope_type == "custom":
+            try:
+                scope_id = int(scope_value)
+            except (TypeError, ValueError):
+                scope_id = 0
+            custom_scope = db.scalar(select(CustomScopeSet).where(CustomScopeSet.id == scope_id))
+            if custom_scope is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"自定义范围不存在：{scope_value}")
+            normalized[(scope_type, str(custom_scope.id))] = UserDataScopeView(
+                scope_type=scope_type,
+                scope_value=str(custom_scope.id),
+                scope_name=custom_scope.name,
+            )
 
     for item in payload_tenant_roles:
         tenant_code = str(item.tenant_code or "").strip()
@@ -121,7 +166,7 @@ def _normalize_user_data_scopes(
             continue
         tenant = db.scalar(select(Tenant).where(Tenant.code == tenant_code))
         if tenant is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"租户不存在：{tenant_code}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"公司不存在：{tenant_code}")
         normalized[("tenant", tenant.code)] = UserDataScopeView(
             scope_type="tenant",
             scope_value=tenant.code,
@@ -147,8 +192,116 @@ def _resolve_roles(db: Session, role_names_input: list[str]) -> list[Role]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"存在未定义的角色：{'、'.join(missing)}",
-        )
+    )
     return sorted(roles, key=lambda item: item.name)
+
+
+def _tenant_codes_for_scopes(db: Session, data_scopes: list[UserDataScopeView]) -> set[str]:
+    tenant_codes: set[str] = set()
+    for item in data_scopes:
+        if item.scope_type == "all":
+            tenant_codes.add("*")
+            continue
+
+        if item.scope_type == "tenant":
+            tenant_codes.add(item.scope_value)
+            continue
+
+        if item.scope_type == "project":
+            project = db.scalar(select(Project).where(Project.code == item.scope_value))
+            if project is not None:
+                tenant = db.get(Tenant, project.tenant_id)
+                if tenant is not None:
+                    tenant_codes.add(tenant.code)
+            continue
+
+        if item.scope_type == "site":
+            rows = db.execute(
+                select(Tenant.code)
+                .join(TenantSiteBinding, TenantSiteBinding.tenant_id == Tenant.id)
+                .join(Site, Site.id == TenantSiteBinding.site_id)
+                .where(Site.code == item.scope_value)
+            ).all()
+            tenant_codes.update(code for code, in rows if code)
+            continue
+
+        if item.scope_type == "device_group":
+            device_group = db.scalar(select(DeviceGroup).where(DeviceGroup.code == item.scope_value))
+            if device_group is not None:
+                tenant = db.get(Tenant, device_group.tenant_id)
+                if tenant is not None:
+                    tenant_codes.add(tenant.code)
+            continue
+
+        if item.scope_type == "custom":
+            try:
+                scope_id = int(item.scope_value)
+            except (TypeError, ValueError):
+                scope_id = 0
+            if scope_id:
+                custom_scope = db.get(CustomScopeSet, scope_id)
+                if custom_scope is not None:
+                    tenant = db.get(Tenant, custom_scope.tenant_id)
+                    if tenant is not None:
+                        tenant_codes.add(tenant.code)
+            continue
+
+        if item.scope_type == "region":
+            rows = db.execute(
+                select(Tenant.code)
+                .join(TenantSiteBinding, TenantSiteBinding.tenant_id == Tenant.id)
+                .join(Site, Site.id == TenantSiteBinding.site_id)
+                .where(Site.region == item.scope_value)
+            ).all()
+            tenant_codes.update(code for code, in rows if code)
+
+    return tenant_codes
+
+
+def _assert_tenant_scope_allowed(
+    db: Session,
+    access: AccessContext,
+    data_scopes: list[UserDataScopeView],
+    tenant_roles: list[UserTenantRoleAssign],
+):
+    if access.can_global_read:
+        return
+
+    if any(item.scope_type == "all" for item in data_scopes):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能管理本公司账号")
+
+    requested_tenant_codes = {item.tenant_code for item in tenant_roles if item.tenant_code}
+    requested_tenant_codes.update(_tenant_codes_for_scopes(db, data_scopes))
+
+    if not requested_tenant_codes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少公司范围")
+
+    if not requested_tenant_codes.issubset(access.tenant_codes):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能管理本公司账号")
+
+
+def _assert_assignable_roles(access: AccessContext, roles: list[Role]):
+    if access.can_global_read:
+        return
+    forbidden = [item.name for item in roles if item.name in {"admin", "hq_noc"}]
+    if forbidden:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能分配平台级角色")
+
+
+def _user_tenant_codes(db: Session, user: User) -> set[str]:
+    codes = {item.tenant.code for item in user.tenant_roles if item.tenant and item.tenant.code}
+    if not codes:
+        scopes = _to_response(user).data_scopes
+        codes.update(code for code in _tenant_codes_for_scopes(db, scopes) if code != "*")
+    return codes
+
+
+def _assert_manageable_user(db: Session, access: AccessContext, user: User):
+    if access.can_global_read:
+        return
+    target_codes = _user_tenant_codes(db, user)
+    if not target_codes or not target_codes.issubset(access.tenant_codes):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能管理本公司账号")
 
 
 def _sync_role_permissions(db: Session, role: Role, permission_keys: list[str]):
@@ -262,9 +415,15 @@ def get_user_meta(_=Depends(require_admin)):
 
 
 @router.get("", response_model=list[UserResponse])
-def list_users(db: Session = Depends(get_db), _=Depends(require_admin)):
+def list_users(
+    db: Session = Depends(get_db),
+    _=Depends(require_admin),
+    access: AccessContext = Depends(get_access_context),
+):
     users = list(db.scalars(select(User).order_by(User.id.desc())).all())
-    return [_to_response(item) for item in users]
+    if access.can_global_read:
+        return [_to_response(item) for item in users]
+    return [_to_response(item) for item in users if _user_tenant_codes(db, item).issubset(access.tenant_codes)]
 
 
 @router.get("/roles", response_model=list[str])
@@ -361,7 +520,8 @@ def delete_role_def(
 def create_user(
     payload: UserCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    current_user: User = Depends(require_admin),
+    access: AccessContext = Depends(get_access_context),
 ):
     username = (payload.username or "").strip()
     if not username:
@@ -376,7 +536,9 @@ def create_user(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="用户名已存在")
 
     roles = _resolve_roles(db, payload.role_names)
+    _assert_assignable_roles(access, roles)
     data_scopes = _normalize_user_data_scopes(db, payload.data_scopes, payload.tenant_roles)
+    _assert_tenant_scope_allowed(db, access, data_scopes, payload.tenant_roles)
 
     item = User(
         username=username,
@@ -389,9 +551,154 @@ def create_user(
     db.flush()
     _sync_user_data_scopes(db, item, data_scopes)
     _sync_user_tenant_roles(db, user=item, roles=roles, data_scopes=data_scopes)
+    primary_tenant_code = next((scope.scope_value for scope in data_scopes if scope.scope_type == "tenant"), None)
+    tenant = db.scalar(select(Tenant).where(Tenant.code == primary_tenant_code)) if primary_tenant_code else None
+    write_operation_log(
+        db,
+        operator_id=current_user.id,
+        tenant_id=tenant.id if tenant else None,
+        action="user.create",
+        target_type="user",
+        target_id=str(item.id),
+        content=f"创建用户 {item.username}，角色={','.join(role.name for role in roles)}",
+    )
     db.commit()
     db.refresh(item)
     return _to_response(item)
+
+
+@router.post("/batch", response_model=UserBatchCreateResponse)
+def batch_create_users(
+    payload: UserBatchCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+    access: AccessContext = Depends(get_access_context),
+):
+    if not payload.items:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请至少提供一条用户记录")
+
+    roles = _resolve_roles(db, payload.role_names)
+    _assert_assignable_roles(access, roles)
+    data_scopes = _normalize_user_data_scopes(db, payload.data_scopes, payload.tenant_roles)
+    _assert_tenant_scope_allowed(db, access, data_scopes, payload.tenant_roles)
+
+    default_password = str(payload.default_password or "")
+    if default_password and len(default_password) < 6:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="默认密码长度至少 6 位")
+    on_existing = str(payload.on_existing or "skip").strip().lower()
+    if on_existing not in {"skip", "update_name", "reset_password"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的已存在账号处理策略")
+
+    seen_usernames: set[str] = set()
+    created_usernames: list[str] = []
+    created_items: list[dict] = []
+    updated_items: list[dict] = []
+    skipped_items: list[dict] = []
+    failed_items: list[dict] = []
+    primary_tenant_code = next((scope.scope_value for scope in data_scopes if scope.scope_type == "tenant"), None)
+    tenant = db.scalar(select(Tenant).where(Tenant.code == primary_tenant_code)) if primary_tenant_code else None
+
+    for row in payload.items:
+        username = (row.username or "").strip()
+        full_name = (row.full_name or "").strip() or None
+        password = str(row.password or "").strip() or default_password
+
+        if not username:
+            failed_items.append({"username": "", "message": "用户名不能为空"})
+            continue
+        if len(username) < 3 or len(username) > 64:
+            failed_items.append({"username": username, "message": "用户名长度必须在 3-64 位之间"})
+            continue
+        if username in seen_usernames:
+            failed_items.append({"username": username, "message": "批量数据中用户名重复"})
+            continue
+        exists = db.scalar(select(User).where(User.username == username))
+        if exists is not None:
+            if on_existing == "skip":
+                skipped_items.append({"username": username, "message": "用户名已存在，已跳过"})
+                continue
+            _assert_manageable_user(db, access, exists)
+            if on_existing == "update_name":
+                exists.full_name = full_name
+                updated_items.append({"username": username, "message": "已更新姓名"})
+                write_operation_log(
+                    db,
+                    operator_id=current_user.id,
+                    tenant_id=tenant.id if tenant else None,
+                    action="user.batch_update_item",
+                    target_type="user",
+                    target_id=str(exists.id),
+                    content=f"批量更新用户 {username}，更新项=full_name",
+                )
+                continue
+            if len(password) < 6:
+                failed_items.append({"username": username, "message": "更新密码时缺少有效密码，且默认密码不可用"})
+                continue
+            exists.full_name = full_name
+            exists.password_hash = get_password_hash(password)
+            updated_items.append({"username": username, "message": "已更新姓名并重置密码"})
+            write_operation_log(
+                db,
+                operator_id=current_user.id,
+                tenant_id=tenant.id if tenant else None,
+                action="user.batch_update_item",
+                target_type="user",
+                target_id=str(exists.id),
+                content=f"批量更新用户 {username}，更新项=full_name,password",
+            )
+            continue
+        if len(password) < 6:
+            failed_items.append({"username": username, "message": "缺少有效密码，且默认密码不可用"})
+            continue
+
+        seen_usernames.add(username)
+        item = User(
+            username=username,
+            password_hash=get_password_hash(password),
+            full_name=full_name,
+            is_active=True,
+        )
+        item.roles = roles
+        db.add(item)
+        db.flush()
+        _sync_user_data_scopes(db, item, data_scopes)
+        _sync_user_tenant_roles(db, user=item, roles=roles, data_scopes=data_scopes)
+        created_usernames.append(username)
+        created_items.append({"username": username, "message": "创建成功"})
+        write_operation_log(
+            db,
+            operator_id=current_user.id,
+            tenant_id=tenant.id if tenant else None,
+            action="user.batch_create_item",
+            target_type="user",
+            target_id=str(item.id),
+            content=f"批量创建用户 {username}，角色={','.join(role.name for role in roles)}",
+        )
+
+    write_operation_log(
+        db,
+        operator_id=current_user.id,
+        tenant_id=tenant.id if tenant else None,
+        action="user.batch_create",
+        target_type="user_batch",
+        target_id=primary_tenant_code or None,
+        content=(
+            f"批量创建员工：成功 {len(created_items)} 条，"
+            f"更新 {len(updated_items)} 条，跳过 {len(skipped_items)} 条，失败 {len(failed_items)} 条"
+        ),
+    )
+    db.commit()
+    return UserBatchCreateResponse(
+        created_count=len(created_usernames),
+        updated_count=len(updated_items),
+        skipped_count=len(skipped_items),
+        failed_count=len(failed_items),
+        usernames=created_usernames,
+        created_items=created_items,
+        updated_items=updated_items,
+        skipped_items=skipped_items,
+        failed_items=failed_items,
+    )
 
 
 @router.put("/{user_id}", response_model=UserResponse)
@@ -400,10 +707,12 @@ def update_user(
     payload: UserUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
+    access: AccessContext = Depends(get_access_context),
 ):
     item = db.get(User, user_id)
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    _assert_manageable_user(db, access, item)
 
     username = (payload.username or "").strip()
     if not username:
@@ -418,7 +727,9 @@ def update_user(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能停用当前登录用户")
 
     roles = _resolve_roles(db, payload.role_names)
+    _assert_assignable_roles(access, roles)
     data_scopes = _normalize_user_data_scopes(db, payload.data_scopes, payload.tenant_roles)
+    _assert_tenant_scope_allowed(db, access, data_scopes, payload.tenant_roles)
 
     item.username = username
     item.full_name = (payload.full_name or "").strip() or None
@@ -431,6 +742,17 @@ def update_user(
 
     _sync_user_data_scopes(db, item, data_scopes)
     _sync_user_tenant_roles(db, user=item, roles=roles, data_scopes=data_scopes)
+    primary_tenant_code = next((scope.scope_value for scope in data_scopes if scope.scope_type == "tenant"), None)
+    tenant = db.scalar(select(Tenant).where(Tenant.code == primary_tenant_code)) if primary_tenant_code else None
+    write_operation_log(
+        db,
+        operator_id=current_user.id,
+        tenant_id=tenant.id if tenant else None,
+        action="user.update",
+        target_type="user",
+        target_id=str(item.id),
+        content=f"更新用户 {item.username}，角色={','.join(role.name for role in roles)}，状态={'启用' if item.is_active else '停用'}",
+    )
     db.commit()
     db.refresh(item)
     return _to_response(item)
@@ -441,13 +763,26 @@ def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
+    access: AccessContext = Depends(get_access_context),
 ):
     item = db.get(User, user_id)
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
     if current_user.id == user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能删除当前登录用户")
+    _assert_manageable_user(db, access, item)
 
+    target_tenant_code = next((row.tenant.code for row in item.tenant_roles if row.tenant), None)
+    tenant = db.scalar(select(Tenant).where(Tenant.code == target_tenant_code)) if target_tenant_code else None
+    write_operation_log(
+        db,
+        operator_id=current_user.id,
+        tenant_id=tenant.id if tenant else None,
+        action="user.delete",
+        target_type="user",
+        target_id=str(item.id),
+        content=f"删除用户 {item.username}",
+    )
     db.delete(item)
     db.commit()
     return {"message": "用户已删除"}
