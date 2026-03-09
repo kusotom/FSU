@@ -304,7 +304,7 @@ function createPushplusForm() {
   return {
     channel: 'wechat',
     topic: '',
-    template: 'txt',
+    template: 'html',
   };
 }
 
@@ -433,7 +433,7 @@ const parsePushplusSecret = (raw) => {
     return {
       channel: parsed.channel || 'wechat',
       topic: parsed.topic || '',
-      template: parsed.template || 'txt',
+      template: parsed.template || 'html',
     };
   } catch (_e) {
     return createPushplusForm();

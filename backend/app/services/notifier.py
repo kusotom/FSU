@@ -401,17 +401,21 @@ def _channel_test_payload(channel_type: str, content: str) -> dict:
     if channel_type == "wechat_robot":
         return {"msgtype": "text", "text": {"content": _trim_text(content)}}
     if channel_type == "pushplus":
-        return {"title": "[FSU] 通道测试", "content": _trim_text(content, 300), "template": "txt"}
+        return {"title": "[FSU] 通道测试", "content": _trim_text(content, 300), "template": "html"}
     return {"event_type": "test", "message": content}
 
 
 def _pushplus_payload(channel: NotifyChannel, title: str, content: str) -> dict:
     config = _parse_pushplus_secret(channel.secret)
+    template = config.get("template") or "html"
+    rendered_content = _trim_text(content, 1800)
+    if template == "html":
+        rendered_content = rendered_content.replace("\n", "<br/>")
     payload = {
         "token": channel.endpoint,
         "title": _trim_text(title, 120),
-        "content": _trim_text(content, 1800),
-        "template": config.get("template") or "txt",
+        "content": rendered_content,
+        "template": template,
     }
     if config.get("channel"):
         payload["channel"] = config["channel"]

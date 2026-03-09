@@ -785,3 +785,11 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 - 修改文件：
   - `frontend/src/views/AlarmsView.vue`
   - `frontend/src/views/UsersView.vue`
+
+### 15.16 PushPlus 中文乱码修复（2026-03-09）
+- 将 PushPlus 默认模板从 `txt` 调整为 `html`。
+- PushPlus 正文在发送前会将换行转换成 `<br/>`，避免中文内容在部分客户端渲染异常。
+- 同步调整通知页 PushPlus 通道的默认模板配置为 `html`。
+- 修改文件：
+  - `backend/app/services/notifier.py`
+  - `frontend/src/views/NotifyView.vue`
