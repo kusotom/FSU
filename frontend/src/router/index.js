@@ -35,6 +35,8 @@ const routes = [
         "notify.receiver.view",
         "notify.group.view",
         "notify.rule.view",
+        "notify.oncall.view",
+        "notify.push_log.view",
       ],
     },
   },

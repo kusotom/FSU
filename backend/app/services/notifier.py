@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.alarm import AlarmEvent
 from app.models.device import FSUDevice, MonitorPoint
+from app.models.notify_admin import AlarmPushLog
 from app.models.notify import NotifyChannel, NotifyPolicy
 from app.models.site import Site
 
@@ -439,6 +440,30 @@ async def send_channel_test_message(channel: NotifyChannel, content: str) -> tup
     return await _post_json(channel.endpoint, payload, channel_type=channel.channel_type)
 
 
+async def retry_alarm_push_log(log: AlarmPushLog) -> tuple[bool, str]:
+    content = str(log.content or "").strip()
+    title = str(log.title or "").strip() or "[FSU] 推送重发"
+
+    if log.channel_type == "sms_tencent":
+        phones = _parse_sms_phone_numbers(log.target)
+        return await _send_tencent_sms(phones, content or title)
+    if log.channel_type == "pushplus":
+        payload = {
+            "token": log.target,
+            "title": _trim_text(title, 120),
+            "content": _trim_text((content or title).replace("\n", "<br/>"), 1800),
+            "template": "html",
+        }
+        return await _post_json(_PUSHPLUS_ENDPOINT, payload, channel_type="pushplus")
+    if log.channel_type == "wechat_robot":
+        payload = {"msgtype": "text", "text": {"content": _trim_text(content or title)}}
+        return await _post_json(log.target, payload, channel_type="wechat_robot")
+    if log.channel_type == "webhook":
+        payload = {"event_type": "retry", "title": title, "content": content}
+        return await _post_json(log.target, payload, channel_type="webhook")
+    return False, f"unsupported channel type: {log.channel_type}"
+
+
 def _policy_channel_ids(policy: NotifyPolicy) -> list[int]:
     raw = str(getattr(policy, "channel_ids", "") or "").strip()
     if raw:
@@ -473,6 +498,7 @@ async def dispatch_alarm_notifications(
     }
 
     results: list[dict] = []
+    has_logs = False
     for policy in policies:
         if alarm.alarm_level < policy.min_alarm_level:
             continue
@@ -514,6 +540,26 @@ async def dispatch_alarm_notifications(
                 payload = _webhook_payload(event_type, alarm, site, device, point)
                 success, detail = await _post_json(channel.endpoint, payload, channel_type=channel.channel_type)
 
+            db.add(
+                AlarmPushLog(
+                    tenant_id=site.tenant_id,
+                    project_id=getattr(site, "project_id", None),
+                    site_id=site.id,
+                    device_group_id=None,
+                    alarm_id=alarm.id,
+                    policy_name=policy.name,
+                    channel_name=channel.name,
+                    channel_type=channel.channel_type,
+                    target=channel.endpoint,
+                    title=_alarm_notify_title(event_type, alarm),
+                    content=_alarm_brief_text(event_type, alarm, point),
+                    push_status="SUCCESS" if success else "FAILED",
+                    error_message=None if success else detail,
+                    retry_count=0,
+                )
+            )
+            has_logs = True
+
             results.append(
                 {
                     "policy": policy.name,
@@ -522,4 +568,6 @@ async def dispatch_alarm_notifications(
                     "detail": detail,
                 }
             )
+    if has_logs:
+        db.commit()
     return results

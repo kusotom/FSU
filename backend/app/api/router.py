@@ -11,6 +11,8 @@ from app.api.routes import (
     ingest,
     notify,
     notify_groups,
+    notify_oncall,
+    notify_push_logs,
     notify_receivers,
     notify_rules,
     operation_logs,
@@ -33,6 +35,8 @@ api_router.include_router(operation_logs.router)
 api_router.include_router(notify_receivers.router)
 api_router.include_router(notify_groups.router)
 api_router.include_router(notify_rules.router)
+api_router.include_router(notify_oncall.router)
+api_router.include_router(notify_push_logs.router)
 api_router.include_router(tenants.router)
 api_router.include_router(sites.router)
 api_router.include_router(ingest.router)

@@ -1,5 +1,13 @@
 from app.models.notify import NotifyChannel, NotifyPolicy
-from app.models.notify_admin import NotifyGroup, NotifyGroupMember, NotifyReceiver, NotifyRule
+from app.models.notify_admin import (
+    AlarmPushLog,
+    NotifyGroup,
+    NotifyGroupMember,
+    NotifyReceiver,
+    NotifyRule,
+    OncallSchedule,
+    OncallScheduleMember,
+)
 from app.models.alarm import AlarmActionLog, AlarmConditionState, AlarmEvent
 from app.models.custom_scope import CustomScopeItem, CustomScopeSet
 from app.models.device import FSUDevice, MonitorPoint
@@ -39,6 +47,9 @@ __all__ = [
     "NotifyGroup",
     "NotifyGroupMember",
     "NotifyRule",
+    "OncallSchedule",
+    "OncallScheduleMember",
+    "AlarmPushLog",
     "OperationLog",
     "Project",
     "DeviceGroup",

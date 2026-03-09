@@ -862,3 +862,40 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - `backend/app/api/routes/projects.py`
   - `backend/app/api/routes/device_groups.py`
   - `frontend/src/views/NotifyView.vue`
+
+### 15.20 告警通知治理二期：值班表与推送日志（2026-03-09）
+- 在公司级通知治理基础上，继续补齐第二阶段能力：
+  - 值班表
+  - 推送日志
+  - 失败重发
+- 新增权限点：
+  - `notify.oncall.view`
+  - `notify.oncall.manage`
+  - `notify.push_log.view`
+  - `notify.push_log.retry`
+- `通知管理` 页面新增两个公司级页签：
+  - `值班表`
+  - `推送日志`
+- 值班表能力：
+  - 支持按公司、项目、站点、设备组、自定义范围维护值班表
+  - 支持配置值班成员顺位
+  - 支持新增、编辑、删除
+- 推送日志能力：
+  - 真实告警发送时写入 `alarm_push_log`
+  - 记录策略名、通道名、目标、发送状态、错误信息、重试次数
+  - 页面支持查看最近日志并对失败记录执行重发
+- 新增接口：
+  - `GET/POST/PUT/DELETE /api/v1/notify-oncall?tenant_code=...`
+  - `GET /api/v1/notify-push-logs?tenant_code=...`
+  - `POST /api/v1/notify-push-logs/{id}/retry?tenant_code=...`
+- 后端约束：
+  - 值班表成员必须属于当前公司
+  - 值班表作用范围必须属于当前公司
+  - 推送日志查看与重发同样叠加租户与数据范围校验
+- 本轮主要修改文件：
+  - `backend/app/models/notify_admin.py`
+  - `backend/app/schemas/notify_admin.py`
+  - `backend/app/services/notifier.py`
+  - `backend/app/api/routes/notify_oncall.py`
+  - `backend/app/api/routes/notify_push_logs.py`
+  - `frontend/src/views/NotifyView.vue`

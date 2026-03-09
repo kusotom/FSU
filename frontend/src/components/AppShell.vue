@@ -15,7 +15,7 @@
         告警规则/策略
       </router-link>
       <router-link
-        v-if="auth.hasAnyPermission(['notify.channel.view', 'notify.policy.view', 'notify.receiver.view', 'notify.group.view', 'notify.rule.view'])"
+        v-if="auth.hasAnyPermission(['notify.channel.view', 'notify.policy.view', 'notify.receiver.view', 'notify.group.view', 'notify.rule.view', 'notify.oncall.view', 'notify.push_log.view'])"
         class="nav-link"
         to="/notify"
       >

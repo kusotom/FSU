@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -178,3 +178,83 @@ class NotifyRuleResponse(BaseModel):
     is_enabled: bool
     created_at: datetime
 
+
+class OncallScheduleCreate(BaseModel):
+    name: str
+    description: str | None = None
+    timezone_name: str = "Asia/Shanghai"
+    scope_type: str = "TENANT"
+    project_id: int | None = None
+    site_id: int | None = None
+    device_group_id: int | None = None
+    custom_scope_set_id: int | None = None
+    member_ids: list[int] = Field(default_factory=list)
+    is_enabled: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def validate_schedule_name(cls, value: str) -> str:
+        value = str(value or "").strip()
+        if not value:
+            raise ValueError("name cannot be empty")
+        if len(value) > 128:
+            raise ValueError("name too long")
+        return value
+
+    @field_validator("scope_type")
+    @classmethod
+    def validate_schedule_scope(cls, value: str) -> str:
+        value = str(value or "").strip().upper()
+        if value not in VALID_SCOPE_TYPES:
+            raise ValueError("invalid scope_type")
+        return value
+
+    @model_validator(mode="after")
+    def validate_schedule_scope_fields(self):
+        if self.scope_type == "PROJECT" and not self.project_id:
+            raise ValueError("PROJECT scope requires project_id")
+        if self.scope_type == "SITE" and not self.site_id:
+            raise ValueError("SITE scope requires site_id")
+        if self.scope_type == "DEVICE_GROUP" and not self.device_group_id:
+            raise ValueError("DEVICE_GROUP scope requires device_group_id")
+        if self.scope_type == "CUSTOM" and not self.custom_scope_set_id:
+            raise ValueError("CUSTOM scope requires custom_scope_set_id")
+        return self
+
+
+class OncallScheduleResponse(BaseModel):
+    id: int
+    tenant_code: str
+    name: str
+    description: str | None = None
+    timezone_name: str
+    scope_type: str
+    project_id: int | None = None
+    site_id: int | None = None
+    device_group_id: int | None = None
+    custom_scope_set_id: int | None = None
+    member_ids: list[int] = Field(default_factory=list)
+    member_names: list[str] = Field(default_factory=list)
+    member_count: int = 0
+    is_enabled: bool
+    created_at: datetime
+
+
+class AlarmPushLogResponse(BaseModel):
+    id: int
+    tenant_code: str
+    alarm_id: int | None = None
+    policy_name: str | None = None
+    channel_name: str | None = None
+    channel_type: str
+    target: str
+    title: str | None = None
+    content: str | None = None
+    push_status: str
+    error_message: str | None = None
+    retry_count: int
+    pushed_at: datetime
+
+
+class AlarmPushLogRetryRequest(BaseModel):
+    log_ids: list[int] = Field(default_factory=list)
