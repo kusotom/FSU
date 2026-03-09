@@ -24,7 +24,20 @@ const routes = [
     meta: { auth: true, anyPermissions: ["alarm_rule.template.view", "alarm_rule.tenant.view"] },
   },
   { path: "/users", component: UsersView, meta: { auth: true, permission: "user.view" } },
-  { path: "/notify", component: NotifyView, meta: { auth: true, anyPermissions: ["notify.channel.view", "notify.policy.view"] } },
+  {
+    path: "/notify",
+    component: NotifyView,
+    meta: {
+      auth: true,
+      anyPermissions: [
+        "notify.channel.view",
+        "notify.policy.view",
+        "notify.receiver.view",
+        "notify.group.view",
+        "notify.rule.view",
+      ],
+    },
+  },
 ];
 
 const router = createRouter({

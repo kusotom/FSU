@@ -17,7 +17,7 @@ from app.services.operation_log import write_operation_log
 router = APIRouter(prefix="/device-groups", tags=["device-groups"])
 
 
-def _assert_tenant_allowed(access: AccessContext, tenant_id: int):
+def _assert_tenant_allowed(access: AccessContext, tenant_id: int) -> None:
     if access.can_global_read:
         return
     if tenant_id not in access.tenant_ids:
@@ -31,12 +31,11 @@ def _get_tenant_by_code(db: Session, tenant_code: str) -> Tenant:
     return tenant
 
 
-def _validate_resource_belongs_tenant(db: Session, tenant_id: int, project_id: int | None, site_id: int | None):
+def _validate_resource_belongs_tenant(db: Session, tenant_id: int, project_id: int | None, site_id: int | None) -> None:
     if project_id is not None:
         project = db.scalar(select(Project).where(Project.id == project_id, Project.tenant_id == tenant_id))
         if project is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目不属于当前公司")
-
     if site_id is not None:
         site = db.get(Site, site_id)
         if site is None:
@@ -110,6 +109,7 @@ def create_device_group(
         name=name,
     )
     db.add(device_group)
+    db.flush()
     write_operation_log(
         db,
         operator_id=current_user.id,

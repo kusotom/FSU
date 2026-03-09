@@ -813,3 +813,52 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 - 新增修复脚本：
   - `backend/scripts/fix_notify_display_names.py`
 - 该脚本用于修正本地数据库中已有的通知通道/策略名称，不影响业务逻辑。
+
+### 15.19 公司级告警通知治理（2026-03-09）
+- 在原有“通知通道 / 通知策略”基础上，补齐了公司级通知治理第一阶段能力：
+  - 通知接收人
+  - 通知组
+  - 推送规则
+- 页面入口仍复用 `通知管理`，但已改为统一的页签结构：
+  - 通知通道
+  - 通知策略
+  - 通知接收人
+  - 通知组
+  - 推送规则
+- 公司级页签按 `tenant_code` 隔离加载，前端先选择公司，再查看或维护对应数据。
+- 新增权限点：
+  - `notify.receiver.view`
+  - `notify.receiver.manage`
+  - `notify.group.view`
+  - `notify.group.manage`
+  - `notify.rule.view`
+  - `notify.rule.manage`
+- 内置角色默认权限已同步扩展：
+  - `admin`
+  - `hq_noc`
+  - `sub_noc`
+- 新增后端接口：
+  - `GET/POST/PUT/DELETE /api/v1/notify-receivers?tenant_code=...`
+  - `GET/POST/PUT/DELETE /api/v1/notify-groups?tenant_code=...`
+  - `GET/POST/PUT/DELETE /api/v1/notify-rules?tenant_code=...`
+- 推送规则支持的作用范围：
+  - `TENANT`
+  - `PROJECT`
+  - `SITE`
+  - `DEVICE_GROUP`
+  - `CUSTOM`
+- 后端约束：
+  - 强制校验 `tenant_code` 对应租户
+  - 强制校验项目 / 站点 / 设备组 / 自定义范围是否属于当前公司
+  - 禁止跨租户修改接收人、通知组、推送规则
+  - 删除通知组前会检查是否仍被推送规则引用
+- 本轮主要修改文件：
+  - `backend/app/models/notify_admin.py`
+  - `backend/app/schemas/notify_admin.py`
+  - `backend/app/services/notify_guard.py`
+  - `backend/app/api/routes/notify_receivers.py`
+  - `backend/app/api/routes/notify_groups.py`
+  - `backend/app/api/routes/notify_rules.py`
+  - `backend/app/api/routes/projects.py`
+  - `backend/app/api/routes/device_groups.py`
+  - `frontend/src/views/NotifyView.vue`

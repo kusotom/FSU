@@ -16,7 +16,7 @@ from app.services.operation_log import write_operation_log
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
-def _assert_tenant_allowed(access: AccessContext, tenant_id: int):
+def _assert_tenant_allowed(access: AccessContext, tenant_id: int) -> None:
     if access.can_global_read:
         return
     if tenant_id not in access.tenant_ids:
@@ -81,6 +81,7 @@ def create_project(
 
     project = Project(tenant_id=tenant.id, code=code, name=name, status="active")
     db.add(project)
+    db.flush()
     write_operation_log(
         db,
         operator_id=current_user.id,
