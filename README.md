@@ -722,3 +722,13 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 通知策略表格同步调整为可滚动布局
 - 修改文件：
   - `frontend/src/views/NotifyView.vue`
+
+### 15.12 通知策略页面交互重做（2026-03-09）
+- 将通知页从“双栏内嵌表单”改为“页签 + 列表 + 右侧抽屉编辑”。
+- 调整后：
+  - 通知通道和通知策略分开浏览
+  - 列表保持完整可读，不再与编辑表单互相挤占空间
+  - 新增、编辑统一在右侧抽屉中完成
+  - 通道测试保留在列表操作区，并在编辑抽屉底部提供入口
+- 修改文件：
+  - `frontend/src/views/NotifyView.vue`
