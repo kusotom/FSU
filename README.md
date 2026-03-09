@@ -803,3 +803,13 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 - 修改文件：
   - `backend/app/api/routes/notify.py`
   - `frontend/src/views/NotifyView.vue`
+
+### 15.18 通知通道/策略历史乱码名称修复（2026-03-09）
+- 对历史测试数据中的乱码名称和弱语义名称做一次性修复：
+  - `PushPlus??` -> `PushPlus微信`
+  - `PushPlus????` -> `PushPlus默认策略`
+  - `????` / `__dup_test__` -> `测试Webhook通道1/2`
+  - `1` -> `测试通知策略`
+- 新增修复脚本：
+  - `backend/scripts/fix_notify_display_names.py`
+- 该脚本用于修正本地数据库中已有的通知通道/策略名称，不影响业务逻辑。
