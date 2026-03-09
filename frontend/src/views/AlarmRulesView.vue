@@ -59,6 +59,7 @@
           <el-select v-model="form.category" style="width: 100%" :disabled="isStrategyMode">
             <el-option label="动力" value="power" />
             <el-option label="环境" value="env" />
+            <el-option label="智能" value="smart" />
             <el-option label="系统" value="system" />
           </el-select>
         </el-form-item>
@@ -212,13 +213,35 @@ const pointOptions = [
 const alarmCodeOptions = [
   { value: "mains_voltage_high", label: "市电电压过高" },
   { value: "mains_voltage_low", label: "市电电压过低" },
+  { value: "mains_current_high", label: "市电电流过高" },
+  { value: "mains_frequency_high", label: "市电频率过高" },
+  { value: "mains_frequency_low", label: "市电频率过低" },
   { value: "room_temp_high", label: "机房温度过高" },
   { value: "room_temp_low", label: "机房温度过低" },
   { value: "room_humidity_low", label: "机房湿度过低" },
   { value: "room_humidity_high", label: "机房湿度过高" },
   { value: "battery_temp_high", label: "电池温度过高" },
-  { value: "gen_fault", label: "油机故障" },
-  { value: "rectifier_fault", label: "整流故障" },
+  { value: "battery_group_voltage_high", label: "电池组电压过高" },
+  { value: "battery_group_voltage_low", label: "电池组电压过低" },
+  { value: "rectifier_output_voltage_high", label: "整流输出电压过高" },
+  { value: "rectifier_output_voltage_low", label: "整流输出电压过低" },
+  { value: "water_leak_alarm", label: "水浸告警" },
+  { value: "smoke_alarm", label: "烟雾告警" },
+  { value: "ac_fault_alarm", label: "空调故障" },
+  { value: "fresh_air_fault_alarm", label: "新风故障" },
+  { value: "gen_fault_alarm", label: "油机故障" },
+  { value: "rectifier_fault_alarm", label: "整流故障" },
+  { value: "battery_fault_alarm", label: "电池故障" },
+  { value: "dc_overcurrent_alarm", label: "直流过流告警" },
+  { value: "ups_bypass_alarm", label: "UPS旁路告警" },
+  { value: "battery_fuse_alarm", label: "电池熔丝告警" },
+  { value: "gen_start_failed_alarm", label: "油机启动失败" },
+  { value: "gen_fuel_low", label: "油机油位过低" },
+  { value: "spd_failure_alarm", label: "防雷器失效" },
+  { value: "ac_high_pressure_alarm", label: "空调高压告警" },
+  { value: "ac_low_pressure_alarm", label: "空调低压告警" },
+  { value: "ac_comm_alarm", label: "空调通信异常" },
+  { value: "camera_offline_alarm", label: "摄像头离线" },
   { value: "fsu_offline", label: "设备离线" },
 ];
 
@@ -305,6 +328,7 @@ const ruleNameLabel = (ruleName, ruleKey, alarmCode) => {
 const categoryLabel = (value) => {
   if (value === "power") return "动力";
   if (value === "env") return "环境";
+  if (value === "smart") return "智能";
   if (value === "system") return "系统";
   return value || "-";
 };
