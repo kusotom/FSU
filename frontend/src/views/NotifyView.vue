@@ -4,9 +4,9 @@
       <h2>通知策略</h2>
     </div>
 
-    <el-row :gutter="16">
+    <el-row :gutter="16" class="notify-grid">
       <el-col :xs="24" :md="12">
-        <el-card>
+        <el-card class="notify-card">
           <template #header>
             <div class="card-title">
               <span>通知通道</span>
@@ -52,36 +52,39 @@
             />
           </el-form>
 
-          <el-table v-if="canViewChannels" :data="channels" size="small" stripe>
-            <el-table-column prop="id" label="编号" width="70" />
-            <el-table-column prop="name" label="名称" />
-            <el-table-column label="类型" width="130">
+          <div v-if="canViewChannels" class="table-wrap">
+            <el-table :data="channels" size="small" stripe class="notify-table">
+              <el-table-column prop="id" label="编号" width="70" />
+              <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
+              <el-table-column label="类型" width="138">
               <template #default="{ row }">{{ channelTypeLabel(row.channel_type) }}</template>
-            </el-table-column>
-            <el-table-column prop="is_enabled" label="启用" width="90">
-              <template #default="{ row }">{{ row.is_enabled ? "是" : "否" }}</template>
-            </el-table-column>
-            <el-table-column v-if="canManageChannels" label="操作" width="160">
-              <template #default="{ row }">
-                <div class="row-actions">
-                  <el-button size="small" text @click="editChannel(row)">编辑</el-button>
-                  <el-button size="small" text @click="toggleChannel(row)">
-                    {{ row.is_enabled ? "停用" : "启用" }}
-                  </el-button>
-                  <el-button size="small" text :loading="testingChannelId === row.id" @click="testChannel(row)">
-                    测试
-                  </el-button>
-                  <el-button size="small" text type="danger" @click="removeChannel(row)">删除</el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
+              </el-table-column>
+              <el-table-column prop="endpoint" label="地址" min-width="220" show-overflow-tooltip />
+              <el-table-column prop="is_enabled" label="启用" width="80">
+                <template #default="{ row }">{{ row.is_enabled ? "是" : "否" }}</template>
+              </el-table-column>
+              <el-table-column v-if="canManageChannels" label="操作" min-width="190" fixed="right">
+                <template #default="{ row }">
+                  <div class="row-actions compact">
+                    <el-button size="small" text @click="editChannel(row)">编辑</el-button>
+                    <el-button size="small" text @click="toggleChannel(row)">
+                      {{ row.is_enabled ? "停用" : "启用" }}
+                    </el-button>
+                    <el-button size="small" text :loading="testingChannelId === row.id" @click="testChannel(row)">
+                      测试
+                    </el-button>
+                    <el-button size="small" text type="danger" @click="removeChannel(row)">删除</el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
           <el-empty v-else description="当前账号无通知通道查看权限" />
         </el-card>
       </el-col>
 
       <el-col :xs="24" :md="12">
-        <el-card>
+        <el-card class="notify-card">
           <template #header>
             <div class="card-title">
               <span>通知策略</span>
@@ -120,31 +123,33 @@
             </el-form-item>
           </el-form>
 
-          <el-table v-if="canViewPolicies" :data="policies" size="small" stripe>
-            <el-table-column prop="id" label="编号" width="70" />
-            <el-table-column prop="name" label="策略名称" />
-            <el-table-column prop="channel_id" label="通道编号" width="90" />
-            <el-table-column label="级别" width="80">
-              <template #default="{ row }">{{ row.min_alarm_level }}级</template>
-            </el-table-column>
-            <el-table-column label="事件">
-              <template #default="{ row }">{{ eventTypesLabel(row.event_types) }}</template>
-            </el-table-column>
-            <el-table-column prop="is_enabled" label="启用" width="80">
-              <template #default="{ row }">{{ row.is_enabled ? "是" : "否" }}</template>
-            </el-table-column>
-            <el-table-column v-if="canManagePolicies" label="操作" width="140">
-              <template #default="{ row }">
-                <div class="row-actions">
-                  <el-button size="small" text @click="editPolicy(row)">编辑</el-button>
-                  <el-button size="small" text @click="togglePolicy(row)">
-                    {{ row.is_enabled ? "停用" : "启用" }}
-                  </el-button>
-                  <el-button size="small" text type="danger" @click="removePolicy(row)">删除</el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
+          <div v-if="canViewPolicies" class="table-wrap">
+            <el-table :data="policies" size="small" stripe class="notify-table">
+              <el-table-column prop="id" label="编号" width="70" />
+              <el-table-column prop="name" label="策略名称" min-width="150" show-overflow-tooltip />
+              <el-table-column prop="channel_id" label="通道编号" width="88" />
+              <el-table-column label="级别" width="80">
+                <template #default="{ row }">{{ row.min_alarm_level }}级</template>
+              </el-table-column>
+              <el-table-column label="事件" min-width="150" show-overflow-tooltip>
+                <template #default="{ row }">{{ eventTypesLabel(row.event_types) }}</template>
+              </el-table-column>
+              <el-table-column prop="is_enabled" label="启用" width="80">
+                <template #default="{ row }">{{ row.is_enabled ? "是" : "否" }}</template>
+              </el-table-column>
+              <el-table-column v-if="canManagePolicies" label="操作" min-width="150" fixed="right">
+                <template #default="{ row }">
+                  <div class="row-actions compact">
+                    <el-button size="small" text @click="editPolicy(row)">编辑</el-button>
+                    <el-button size="small" text @click="togglePolicy(row)">
+                      {{ row.is_enabled ? "停用" : "启用" }}
+                    </el-button>
+                    <el-button size="small" text type="danger" @click="removePolicy(row)">删除</el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
           <el-empty v-else description="当前账号无通知策略查看权限" />
         </el-card>
       </el-col>
@@ -481,10 +486,19 @@ h2 {
   margin: 0;
 }
 
+.notify-grid {
+  align-items: stretch;
+}
+
+.notify-card {
+  height: 100%;
+}
+
 .card-title {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
 }
 
 .actions,
@@ -496,5 +510,34 @@ h2 {
 
 .inline-form {
   margin-bottom: 12px;
+}
+
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.notify-table {
+  min-width: 100%;
+}
+
+.row-actions.compact {
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+@media (max-width: 1200px) {
+  .card-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 768px) {
+  .actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
 }
 </style>
