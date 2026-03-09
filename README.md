@@ -686,11 +686,15 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 - 修复问题：
   - 首次进入“实时监控”页时，偶发提示“站点数据加载失败”，需要手动刷新后才显示站点
 - 原因：
-  - 页面初始化时站点列表和站点概览请求没有做稳态等待
-  - 首次进入时若任一请求抖动，页面会先落到空状态并误报失败
+  - `frontend/src/views/RealtimeView.vue` 在首屏初始化时执行 `rebuildImportantOptions()`
+  - 该函数内部直接使用了 `importantCategoryOrder` 和 `importantCategoryLabelMap`
+  - 但页面脚本里没有定义这两个变量，导致首屏进入时抛出 `ReferenceError`
+  - 异常落在 `onMounted -> ensureInitialSitesReady()` 链路中，因此页面统一提示“站点数据加载失败”
 - 修复方案：
-  - 初始化阶段显式等待站点列表与站点概览加载完成
-  - 首次进入增加一次轻量重试
-  - 请求进行中显示骨架屏，不再提前渲染为空站点
+  - 保留初始化阶段的稳态等待和骨架屏
+  - 在实时监控页中补齐：
+    - `const importantCategoryOrder = pointCategoryOrder`
+    - `const importantCategoryLabelMap = pointCategoryLabelMap`
+  - 让关键监控项配置分组与首屏初始化共用同一份分类常量，避免再次出现未定义变量
 - 修改文件：
   - `frontend/src/views/RealtimeView.vue`
