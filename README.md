@@ -730,5 +730,6 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 列表保持完整可读，不再与编辑表单互相挤占空间
   - 新增、编辑统一在右侧抽屉中完成
   - 通道测试保留在列表操作区，并在编辑抽屉底部提供入口
+  - 删除操作移入“更多”菜单，避免列表主操作区过于拥挤
 - 修改文件：
   - `frontend/src/views/NotifyView.vue`

@@ -43,7 +43,14 @@
                     {{ row.is_enabled ? '停用' : '启用' }}
                   </el-button>
                   <el-button size="small" text :loading="testingChannelId === row.id" @click="testChannel(row)">测试</el-button>
-                  <el-button size="small" text type="danger" @click="removeChannel(row)">删除</el-button>
+                  <el-dropdown trigger="click">
+                    <el-button size="small" text>更多</el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item @click="removeChannel(row)" class="danger-item">删除</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
                 </div>
               </template>
             </el-table-column>
@@ -90,7 +97,14 @@
                   <el-button size="small" text @click="togglePolicy(row)">
                     {{ row.is_enabled ? '停用' : '启用' }}
                   </el-button>
-                  <el-button size="small" text type="danger" @click="removePolicy(row)">删除</el-button>
+                  <el-dropdown trigger="click">
+                    <el-button size="small" text>更多</el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item @click="removePolicy(row)" class="danger-item">删除</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
                 </div>
               </template>
             </el-table-column>
@@ -644,6 +658,10 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+:deep(.danger-item) {
+  color: #dc2626;
 }
 
 @media (max-width: 900px) {
