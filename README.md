@@ -757,3 +757,18 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - `backend/app/services/notifier.py`
   - `backend/app/main.py`
   - `frontend/src/views/NotifyView.vue`
+
+### 15.14 告警通知文案模板统一（2026-03-09）
+- 将通知消息从“直接拼接原始告警内容”改为统一模板。
+- 当前默认文案规则：
+  - 触发：`当前{告警名称}（当前{值}{单位}）`
+  - 恢复：`{告警名称}已恢复（恢复时{值}{单位}）`
+  - 确认：`{告警名称}已确认（当前{值}{单位}）`
+  - 关闭：`{告警名称}已关闭（当前{值}{单位}）`
+- 各通道表现：
+  - 企业微信机器人：标题 + 摘要 + 站点/设备/监控项/时间
+  - 腾讯云短信：压缩摘要，仅发送关键信息
+  - PushPlus：标题 + 摘要 + 站点/设备/监控项/告警级别
+  - Webhook：新增 `summary` 与 `trigger_value_text`
+- 修改文件：
+  - `backend/app/services/notifier.py`

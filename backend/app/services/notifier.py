@@ -1,4 +1,4 @@
-from collections.abc import Iterable
+﻿from collections.abc import Iterable
 import asyncio
 import hashlib
 import hmac
@@ -47,6 +47,33 @@ def _trim_text(value: str, limit: int = 1800) -> str:
     if len(value) <= limit:
         return value
     return f"{value[: limit - 12]}...(truncated)"
+
+
+def _format_trigger_value(alarm: AlarmEvent, point: MonitorPoint) -> str:
+    unit = str(point.unit or "").strip()
+    value = alarm.trigger_value
+    if isinstance(value, float):
+        text = f"{value:.1f}".rstrip("0").rstrip(".")
+    else:
+        text = str(value)
+    return f"{text}{unit}" if unit else text
+
+
+def _alarm_brief_text(event_type: str, alarm: AlarmEvent, point: MonitorPoint) -> str:
+    value_text = _format_trigger_value(alarm, point)
+    alarm_name = str(alarm.alarm_name or point.point_name or "告警").strip()
+    if event_type == "recover":
+        return f"{alarm_name}已恢复（恢复时{value_text}）"
+    if event_type == "ack":
+        return f"{alarm_name}已确认（当前{value_text}）"
+    if event_type == "close":
+        return f"{alarm_name}已关闭（当前{value_text}）"
+    return f"当前{alarm_name}（当前{value_text}）"
+
+
+def _alarm_notify_title(event_type: str, alarm: AlarmEvent) -> str:
+    event_label = _EVENT_LABELS.get(event_type, event_type)
+    return f"[FSU][L{alarm.alarm_level}][{event_label}] {alarm.alarm_name}"
 
 
 def _parse_wechat_robot_result(resp: httpx.Response) -> tuple[bool, str]:
@@ -330,6 +357,8 @@ def _webhook_payload(
         "status": alarm.status,
         "status_label": _STATUS_LABELS.get(alarm.status, alarm.status),
         "trigger_value": alarm.trigger_value,
+        "trigger_value_text": _format_trigger_value(alarm, point),
+        "summary": _alarm_brief_text(event_type, alarm, point),
         "content": alarm.content,
         "started_at": alarm.started_at.isoformat() if alarm.started_at else None,
         "recovered_at": alarm.recovered_at.isoformat() if alarm.recovered_at else None,
@@ -343,17 +372,17 @@ def _wechat_robot_payload(
     device: FSUDevice,
     point: MonitorPoint,
 ) -> dict:
-    event_label = _EVENT_LABELS.get(event_type, event_type)
     status_label = _STATUS_LABELS.get(alarm.status, alarm.status)
+    summary = _alarm_brief_text(event_type, alarm, point)
+    happened_at = (alarm.started_at or datetime.now(timezone.utc)).astimezone().strftime("%Y-%m-%d %H:%M:%S")
     text = (
-        f"[动环告警通知] 事件: {event_label}\n"
-        f"站点: {site.name}({site.code})\n"
-        f"设备: {device.name}({device.code})\n"
-        f"监控项: {point.point_name}({point.point_key})\n"
-        f"告警: {alarm.alarm_name} L{alarm.alarm_level}\n"
-        f"状态: {status_label}\n"
-        f"触发值: {alarm.trigger_value}\n"
-        f"内容: {alarm.content}"
+        f"{_alarm_notify_title(event_type, alarm)}\n"
+        f"{summary}\n"
+        f"站点：{site.name}（{site.code}）\n"
+        f"设备：{device.name}（{device.code}）\n"
+        f"监控项：{point.point_name}\n"
+        f"状态：{status_label}\n"
+        f"时间：{happened_at}"
     )
     return {"msgtype": "text", "text": {"content": _trim_text(text)}}
 
@@ -365,11 +394,7 @@ def _sms_text_payload(
     device: FSUDevice,
     point: MonitorPoint,
 ) -> str:
-    event_label = _EVENT_LABELS.get(event_type, event_type)
-    return _trim_text(
-        f"[FSU] {event_label} L{alarm.alarm_level} 站点:{site.name} 设备:{device.name} 监控项:{point.point_name} 内容:{alarm.content}",
-        120,
-    )
+    return _trim_text(f"[FSU] {_alarm_brief_text(event_type, alarm, point)}", 120)
 
 
 def _channel_test_payload(channel_type: str, content: str) -> dict:
@@ -380,11 +405,7 @@ def _channel_test_payload(channel_type: str, content: str) -> dict:
     return {"event_type": "test", "message": content}
 
 
-def _pushplus_payload(
-    channel: NotifyChannel,
-    title: str,
-    content: str,
-) -> dict:
+def _pushplus_payload(channel: NotifyChannel, title: str, content: str) -> dict:
     config = _parse_pushplus_secret(channel.secret)
     payload = {
         "token": channel.endpoint,
@@ -474,8 +495,15 @@ async def dispatch_alarm_notifications(
                     point=point,
                 )
             elif channel.channel_type == "pushplus":
-                title = f"[FSU] L{alarm.alarm_level} {alarm.alarm_name}"
-                content = _sms_text_payload(event_type, alarm, site, device, point)
+                title = _alarm_notify_title(event_type, alarm)
+                content = (
+                    f"{_alarm_brief_text(event_type, alarm, point)}\n\n"
+                    f"站点：{site.name}（{site.code}）\n"
+                    f"设备：{device.name}（{device.code}）\n"
+                    f"监控项：{point.point_name}\n"
+                    f"告警级别：L{alarm.alarm_level}\n"
+                    f"告警状态：{_STATUS_LABELS.get(alarm.status, alarm.status)}"
+                )
                 payload = _pushplus_payload(channel, title, content)
                 success, detail = await _post_json(_PUSHPLUS_ENDPOINT, payload, channel_type=channel.channel_type)
             else:
