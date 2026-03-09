@@ -793,3 +793,13 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 - 修改文件：
   - `backend/app/services/notifier.py`
   - `frontend/src/views/NotifyView.vue`
+
+### 15.17 通知通道测试文案改为示例告警（2026-03-09）
+- 原“通道测试”默认只发送一句“这是一条通知通道测试消息”，无法体现真实告警样式。
+- 现在留空测试消息时，后端会发送一条示例告警内容：
+  - 当前机房温度过高（当前42℃）
+  - 站点/设备/监控项/告警级别/告警状态
+- 前端测试输入框占位文案同步调整为“留空则发送示例告警内容”。
+- 修改文件：
+  - `backend/app/api/routes/notify.py`
+  - `frontend/src/views/NotifyView.vue`

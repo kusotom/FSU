@@ -108,7 +108,14 @@ async def test_channel(
     if not channel.is_enabled:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="通知通道已禁用，无法测试")
 
-    content = (payload.content or "").strip() or "【FSU v0.21】这是一条通知通道测试消息"
+    content = (payload.content or "").strip() or (
+        "当前机房温度过高（当前42℃）\n\n"
+        "站点：A公司测试站点（SITE-001）\n"
+        "设备：主监控设备（DEV-001）\n"
+        "监控项：机房温度\n"
+        "告警级别：L2\n"
+        "告警状态：活动"
+    )
     success, detail = await send_channel_test_message(channel, content)
     if not success:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"测试发送失败: {detail}")

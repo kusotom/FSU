@@ -156,7 +156,7 @@
           </el-form-item>
         </template>
         <el-form-item label="测试消息">
-          <el-input v-model="channelTestContent" placeholder="留空则使用默认测试文案" />
+          <el-input v-model="channelTestContent" placeholder="留空则发送示例告警内容" />
         </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="channelForm.is_enabled" />
