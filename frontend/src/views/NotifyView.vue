@@ -14,7 +14,7 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">通知通道</div>
-                <div class="panel-tip">维护企业微信机器人、短信和 Webhook 通道。</div>
+                <div class="panel-tip">维护企业微信机器人、PushPlus、短信和 Webhook 通道。</div>
               </div>
               <div class="panel-actions" v-if="canManageChannels">
                 <el-button type="primary" @click="openCreateChannel">新增通道</el-button>
@@ -77,7 +77,7 @@
           <el-table :data="policies" stripe>
             <el-table-column prop="name" label="策略名称" min-width="180" show-overflow-tooltip />
             <el-table-column label="通知通道" min-width="180" show-overflow-tooltip>
-              <template #default="{ row }">{{ channelNameById(row.channel_id) }}</template>
+              <template #default="{ row }">{{ channelNamesByIds(row.channel_ids, row.channel_id) }}</template>
             </el-table-column>
             <el-table-column label="最小级别" width="100">
               <template #default="{ row }">{{ row.min_alarm_level }}级</template>
@@ -128,13 +128,33 @@
         <el-form-item label="类型">
           <el-select v-model="channelForm.channel_type" style="width: 100%">
             <el-option label="企业微信机器人" value="wechat_robot" />
+            <el-option label="PushPlus" value="pushplus" />
             <el-option label="腾讯云短信" value="sms_tencent" />
             <el-option label="通用回调" value="webhook" />
           </el-select>
         </el-form-item>
-        <el-form-item label="地址">
+        <el-form-item :label="channelForm.channel_type === 'pushplus' ? 'Token' : '地址'">
           <el-input v-model="channelForm.endpoint" type="textarea" :rows="3" :placeholder="endpointPlaceholder" />
         </el-form-item>
+        <template v-if="channelForm.channel_type === 'pushplus'">
+          <el-form-item label="推送渠道">
+            <el-select v-model="pushplusForm.channel" style="width: 100%">
+              <el-option label="微信" value="wechat" />
+              <el-option label="短信" value="sms" />
+              <el-option label="邮件" value="mail" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Topic">
+            <el-input v-model="pushplusForm.topic" placeholder="可选，用于群组推送" />
+          </el-form-item>
+          <el-form-item label="模板">
+            <el-select v-model="pushplusForm.template" style="width: 100%">
+              <el-option label="纯文本" value="txt" />
+              <el-option label="HTML" value="html" />
+              <el-option label="Markdown" value="markdown" />
+            </el-select>
+          </el-form-item>
+        </template>
         <el-form-item label="测试消息">
           <el-input v-model="channelTestContent" placeholder="留空则使用默认测试文案" />
         </el-form-item>
@@ -148,6 +168,13 @@
           :closable="false"
           show-icon
           title="企业微信机器人地址示例：https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx"
+        />
+        <el-alert
+          v-if="channelForm.channel_type === 'pushplus'"
+          type="success"
+          :closable="false"
+          show-icon
+          title="PushPlus 填写 token，可选配置微信/短信/邮件渠道与 topic。"
         />
         <el-alert
           v-if="channelForm.channel_type === 'sms_tencent'"
@@ -178,7 +205,7 @@
           <el-input v-model="policyForm.name" placeholder="例如：一级告警策略" />
         </el-form-item>
         <el-form-item label="通知通道">
-          <el-select v-model="policyForm.channel_id" style="width: 100%">
+          <el-select v-model="policyForm.channel_ids" multiple filterable style="width: 100%">
             <el-option
               v-for="item in channels"
               :key="item.id"
@@ -237,6 +264,7 @@ const canManagePolicies = computed(() => auth.hasPermission('notify.policy.manag
 
 const channelForm = ref(createChannelForm());
 const policyForm = ref(createPolicyForm());
+const pushplusForm = ref(createPushplusForm());
 
 const eventTypeOptions = [
   { label: '触发', value: 'trigger' },
@@ -255,6 +283,8 @@ const eventTypeLabelMap = {
 const endpointPlaceholder = computed(() =>
   channelForm.value.channel_type === 'wechat_robot'
     ? 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...'
+    : channelForm.value.channel_type === 'pushplus'
+      ? 'PushPlus token'
     : channelForm.value.channel_type === 'sms_tencent'
       ? '+8613800138000,+8613900139000'
       : 'https://...',
@@ -270,10 +300,18 @@ function createChannelForm() {
   };
 }
 
+function createPushplusForm() {
+  return {
+    channel: 'wechat',
+    topic: '',
+    template: 'txt',
+  };
+}
+
 function createPolicyForm() {
   return {
     name: '',
-    channel_id: null,
+    channel_ids: [],
     min_alarm_level: 2,
     event_type_list: ['trigger', 'recover'],
     is_enabled: true,
@@ -282,15 +320,21 @@ function createPolicyForm() {
 
 const channelTypeLabel = (type) => {
   if (type === 'wechat_robot') return '企业微信机器人';
+  if (type === 'pushplus') return 'PushPlus';
   if (type === 'sms_tencent') return '腾讯云短信';
   if (type === 'webhook') return '通用回调';
   return '未知';
 };
 
-const channelNameById = (channelId) => {
-  const row = channels.value.find((item) => item.id === channelId);
-  if (!row) return `通道#${channelId}`;
-  return row.name;
+const channelNamesByIds = (channelIds, channelId) => {
+  const ids = Array.isArray(channelIds) && channelIds.length ? channelIds : [channelId].filter(Boolean);
+  if (!ids.length) return '-';
+  return ids
+    .map((id) => {
+      const row = channels.value.find((item) => item.id === id);
+      return row ? row.name : `通道#${id}`;
+    })
+    .join('、');
 };
 
 const endpointSummary = (endpoint, channelType) => {
@@ -302,6 +346,9 @@ const endpointSummary = (endpoint, channelType) => {
   }
   if (channelType === 'sms_tencent') {
     return raw;
+  }
+  if (channelType === 'pushplus') {
+    return raw.length > 12 ? `${raw.slice(0, 6)}...${raw.slice(-4)}` : raw;
   }
   return raw;
 };
@@ -343,6 +390,7 @@ const resetChannelForm = () => {
   editingChannelId.value = null;
   channelTestContent.value = '';
   channelForm.value = createChannelForm();
+  pushplusForm.value = createPushplusForm();
 };
 
 const resetPolicyForm = () => {
@@ -368,6 +416,28 @@ const openCreatePolicy = () => {
 const closePolicyDrawer = () => {
   policyDrawerVisible.value = false;
   resetPolicyForm();
+};
+
+const buildPushplusSecret = () =>
+  JSON.stringify(
+    {
+      channel: pushplusForm.value.channel || 'wechat',
+      topic: String(pushplusForm.value.topic || '').trim(),
+      template: pushplusForm.value.template || 'txt',
+    },
+  );
+
+const parsePushplusSecret = (raw) => {
+  try {
+    const parsed = JSON.parse(raw || '{}');
+    return {
+      channel: parsed.channel || 'wechat',
+      topic: parsed.topic || '',
+      template: parsed.template || 'txt',
+    };
+  } catch (_e) {
+    return createPushplusForm();
+  }
 };
 
 const submitChannel = async () => {
@@ -401,12 +471,22 @@ const submitChannel = async () => {
       return;
     }
   }
+  if (channelForm.value.channel_type === 'pushplus') {
+    if (String(channelForm.value.endpoint || '').trim().length < 16) {
+      ElMessage.warning('请填写有效的 PushPlus token');
+      return;
+    }
+  }
   try {
+    const payload = {
+      ...channelForm.value,
+      secret: channelForm.value.channel_type === 'pushplus' ? buildPushplusSecret() : channelForm.value.secret,
+    };
     if (editingChannelId.value) {
-      await http.put(`/notify/channels/${editingChannelId.value}`, channelForm.value);
+      await http.put(`/notify/channels/${editingChannelId.value}`, payload);
       ElMessage.success('通道保存成功');
     } else {
-      await http.post('/notify/channels', channelForm.value);
+      await http.post('/notify/channels', payload);
       ElMessage.success('通道创建成功');
     }
     closeChannelDrawer();
@@ -421,8 +501,8 @@ const submitPolicy = async () => {
     ElMessage.error('无权管理通知策略');
     return;
   }
-  if (!policyForm.value.name || !policyForm.value.channel_id) {
-    ElMessage.warning('请填写策略名称并选择通知通道');
+  if (!policyForm.value.name || !policyForm.value.channel_ids.length) {
+    ElMessage.warning('请填写策略名称并选择至少一个通知通道');
     return;
   }
   if (!policyForm.value.event_type_list.length) {
@@ -432,7 +512,8 @@ const submitPolicy = async () => {
   try {
     const payload = {
       name: policyForm.value.name,
-      channel_id: policyForm.value.channel_id,
+      channel_id: policyForm.value.channel_ids[0],
+      channel_ids: policyForm.value.channel_ids,
       min_alarm_level: policyForm.value.min_alarm_level,
       event_types: policyForm.value.event_type_list.join(','),
       is_enabled: policyForm.value.is_enabled,
@@ -454,6 +535,7 @@ const submitPolicy = async () => {
 const editChannel = (row) => {
   if (!canManageChannels.value) return;
   editingChannelId.value = row.id;
+  pushplusForm.value = row.channel_type === 'pushplus' ? parsePushplusSecret(row.secret) : createPushplusForm();
   channelForm.value = {
     name: row.name,
     channel_type: row.channel_type,
@@ -469,7 +551,7 @@ const editPolicy = (row) => {
   editingPolicyId.value = row.id;
   policyForm.value = {
     name: row.name,
-    channel_id: row.channel_id,
+    channel_ids: Array.isArray(row.channel_ids) && row.channel_ids.length ? row.channel_ids : [row.channel_id].filter(Boolean),
     min_alarm_level: row.min_alarm_level,
     event_type_list: String(row.event_types || '')
       .split(',')
@@ -508,7 +590,8 @@ const togglePolicy = async (row) => {
   try {
     await http.put(`/notify/policies/${row.id}`, {
       name: row.name,
-      channel_id: row.channel_id,
+      channel_id: Array.isArray(row.channel_ids) && row.channel_ids.length ? row.channel_ids[0] : row.channel_id,
+      channel_ids: Array.isArray(row.channel_ids) && row.channel_ids.length ? row.channel_ids : [row.channel_id].filter(Boolean),
       min_alarm_level: row.min_alarm_level,
       event_types: row.event_types,
       is_enabled: !row.is_enabled,

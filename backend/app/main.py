@@ -50,6 +50,25 @@ def _ensure_runtime_indexes():
         logger.exception("runtime index ensure failed")
 
 
+def _ensure_notify_schema():
+    if settings.database_url.startswith("sqlite"):
+        return
+    ddl_list = [
+        "ALTER TABLE notify_policy ADD COLUMN IF NOT EXISTS channel_ids VARCHAR(255)",
+        """
+        UPDATE notify_policy
+        SET channel_ids = channel_id::text
+        WHERE (channel_ids IS NULL OR channel_ids = '') AND channel_id IS NOT NULL
+        """,
+    ]
+    try:
+        with engine.begin() as conn:
+            for ddl in ddl_list:
+                conn.execute(text(ddl))
+    except Exception:
+        logger.exception("notify schema ensure failed")
+
+
 def _ensure_timescaledb_defaults():
     if settings.database_url.startswith("sqlite"):
         return
@@ -113,6 +132,7 @@ async def startup():
         Base.metadata.create_all(bind=engine)
         _ensure_timescaledb_defaults()
         _ensure_runtime_indexes()
+        _ensure_notify_schema()
     db: Session = SessionLocal()
     try:
         seed_roles_and_admin(db)

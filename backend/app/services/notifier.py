@@ -35,6 +35,7 @@ _SMS_TENCENT_ENDPOINT = "https://sms.tencentcloudapi.com"
 _SMS_TENCENT_ACTION = "SendSms"
 _SMS_TENCENT_VERSION = "2021-01-11"
 _SMS_TENCENT_SERVICE = "sms"
+_PUSHPLUS_ENDPOINT = "https://www.pushplus.plus/send"
 
 
 def _event_allowed(event_types: str, event_type: str) -> bool:
@@ -58,6 +59,28 @@ def _parse_wechat_robot_result(resp: httpx.Response) -> tuple[bool, str]:
     if errcode in (0, "0", None):
         return True, f"HTTP {resp.status_code}: ok"
     return False, f"HTTP {resp.status_code}: errcode={errcode} errmsg={errmsg or '-'}"
+
+
+def _parse_pushplus_secret(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _parse_pushplus_result(resp: httpx.Response) -> tuple[bool, str]:
+    try:
+        data = resp.json()
+    except Exception:
+        return False, f"HTTP {resp.status_code}: invalid JSON response"
+    code = data.get("code")
+    message = str(data.get("msg", "")).strip()
+    if code == 200:
+        return True, f"HTTP {resp.status_code}: ok"
+    return False, f"HTTP {resp.status_code}: code={code} msg={message or '-'}"
 
 
 def _normalize_phone_number(value: str) -> str | None:
@@ -194,6 +217,8 @@ async def _post_json(url: str, payload: dict, *, channel_type: str) -> tuple[boo
 
             if channel_type == "wechat_robot":
                 return _parse_wechat_robot_result(resp)
+            if channel_type == "pushplus":
+                return _parse_pushplus_result(resp)
 
             if 200 <= resp.status_code < 300:
                 return True, f"HTTP {resp.status_code}"
@@ -350,15 +375,60 @@ def _sms_text_payload(
 def _channel_test_payload(channel_type: str, content: str) -> dict:
     if channel_type == "wechat_robot":
         return {"msgtype": "text", "text": {"content": _trim_text(content)}}
+    if channel_type == "pushplus":
+        return {"title": "[FSU] 通道测试", "content": _trim_text(content, 300), "template": "txt"}
     return {"event_type": "test", "message": content}
+
+
+def _pushplus_payload(
+    channel: NotifyChannel,
+    title: str,
+    content: str,
+) -> dict:
+    config = _parse_pushplus_secret(channel.secret)
+    payload = {
+        "token": channel.endpoint,
+        "title": _trim_text(title, 120),
+        "content": _trim_text(content, 1800),
+        "template": config.get("template") or "txt",
+    }
+    if config.get("channel"):
+        payload["channel"] = config["channel"]
+    if config.get("topic"):
+        payload["topic"] = config["topic"]
+    if config.get("webhook"):
+        payload["webhook"] = config["webhook"]
+    if config.get("callbackUrl"):
+        payload["callbackUrl"] = config["callbackUrl"]
+    return payload
 
 
 async def send_channel_test_message(channel: NotifyChannel, content: str) -> tuple[bool, str]:
     if channel.channel_type == "sms_tencent":
         phones = _parse_sms_phone_numbers(channel.endpoint)
         return await _send_tencent_sms(phones, content)
+    if channel.channel_type == "pushplus":
+        payload = _pushplus_payload(channel, "[FSU] 通道测试", content)
+        return await _post_json(_PUSHPLUS_ENDPOINT, payload, channel_type=channel.channel_type)
     payload = _channel_test_payload(channel.channel_type, content)
     return await _post_json(channel.endpoint, payload, channel_type=channel.channel_type)
+
+
+def _policy_channel_ids(policy: NotifyPolicy) -> list[int]:
+    raw = str(getattr(policy, "channel_ids", "") or "").strip()
+    if raw:
+        result = []
+        for item in raw.split(","):
+            token = item.strip()
+            if token.isdigit():
+                value = int(token)
+                if value not in result:
+                    result.append(value)
+        if result:
+            return result
+    if getattr(policy, "channel_id", None):
+        return [policy.channel_id]
+    return []
 
 
 async def dispatch_alarm_notifications(
@@ -383,35 +453,41 @@ async def dispatch_alarm_notifications(
             continue
         if not _event_allowed(policy.event_types, event_type):
             continue
-        channel = channels.get(policy.channel_id)
-        if channel is None:
-            continue
+        for channel_id in _policy_channel_ids(policy):
+            channel = channels.get(channel_id)
+            if channel is None:
+                continue
 
-        if channel.channel_type == "wechat_robot":
-            payload = _wechat_robot_payload(event_type, alarm, site, device, point)
-            success, detail = await _post_json(channel.endpoint, payload, channel_type=channel.channel_type)
-        elif channel.channel_type == "sms_tencent":
-            sms_text = _sms_text_payload(event_type, alarm, site, device, point)
-            phones = _parse_sms_phone_numbers(channel.endpoint)
-            success, detail = await _send_tencent_sms(
-                phones,
-                sms_text,
-                event_type=event_type,
-                alarm=alarm,
-                site=site,
-                device=device,
-                point=point,
+            if channel.channel_type == "wechat_robot":
+                payload = _wechat_robot_payload(event_type, alarm, site, device, point)
+                success, detail = await _post_json(channel.endpoint, payload, channel_type=channel.channel_type)
+            elif channel.channel_type == "sms_tencent":
+                sms_text = _sms_text_payload(event_type, alarm, site, device, point)
+                phones = _parse_sms_phone_numbers(channel.endpoint)
+                success, detail = await _send_tencent_sms(
+                    phones,
+                    sms_text,
+                    event_type=event_type,
+                    alarm=alarm,
+                    site=site,
+                    device=device,
+                    point=point,
+                )
+            elif channel.channel_type == "pushplus":
+                title = f"[FSU] L{alarm.alarm_level} {alarm.alarm_name}"
+                content = _sms_text_payload(event_type, alarm, site, device, point)
+                payload = _pushplus_payload(channel, title, content)
+                success, detail = await _post_json(_PUSHPLUS_ENDPOINT, payload, channel_type=channel.channel_type)
+            else:
+                payload = _webhook_payload(event_type, alarm, site, device, point)
+                success, detail = await _post_json(channel.endpoint, payload, channel_type=channel.channel_type)
+
+            results.append(
+                {
+                    "policy": policy.name,
+                    "channel": channel.name,
+                    "success": success,
+                    "detail": detail,
+                }
             )
-        else:
-            payload = _webhook_payload(event_type, alarm, site, device, point)
-            success, detail = await _post_json(channel.endpoint, payload, channel_type=channel.channel_type)
-
-        results.append(
-            {
-                "policy": policy.name,
-                "channel": channel.name,
-                "success": success,
-                "detail": detail,
-            }
-        )
     return results

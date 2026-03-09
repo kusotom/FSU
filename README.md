@@ -237,6 +237,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 - `POST /notify/channels/{id}/test`：测试通知通道（`notify.channel.manage`）。
 - `GET /notify/policies`：查看通知策略（`notify.policy.view`）。
 - `POST /notify/policies`：创建通知策略（`notify.policy.manage`）。
+- 通知策略支持绑定多个通道，后端会并行尝试发送；兼容旧字段 `channel_id`。
 - `GET /reports/alarm-summary`：告警统计报表（按权限裁剪）。
 
 说明：
@@ -732,4 +733,27 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 通道测试保留在列表操作区，并在编辑抽屉底部提供入口
   - 删除操作移入“更多”菜单，避免列表主操作区过于拥挤
 - 修改文件：
+  - `frontend/src/views/NotifyView.vue`
+
+### 15.13 PushPlus 聚合通道与多通道策略（2026-03-09）
+- 新增 `pushplus` 通道类型，用于微信/短信/邮件等 PushPlus 聚合推送。
+- PushPlus 通道约定：
+  - `endpoint` 存储 PushPlus token
+  - `secret` 存储 JSON 配置，例如 `channel/topic/template`
+  - 后端固定请求 `https://www.pushplus.plus/send`
+- 通知策略从“单通道”扩展为“多通道”：
+  - 表单支持一次绑定多个通知通道
+  - 后端兼容旧字段 `channel_id`
+  - 新增 `notify_policy.channel_ids` 字段并在启动时自动回填旧数据
+- 告警触发时会按策略绑定的通道列表逐个发送，当前支持：
+  - 企业微信机器人
+  - PushPlus
+  - 腾讯云短信
+  - 通用 Webhook
+- 修改文件：
+  - `backend/app/models/notify.py`
+  - `backend/app/schemas/notify.py`
+  - `backend/app/api/routes/notify.py`
+  - `backend/app/services/notifier.py`
+  - `backend/app/main.py`
   - `frontend/src/views/NotifyView.vue`

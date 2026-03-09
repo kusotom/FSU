@@ -1,9 +1,10 @@
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 SMS_TENCENT_CHANNEL_TYPE = "sms_tencent"
-VALID_CHANNEL_TYPES = {"wechat_robot", "webhook", SMS_TENCENT_CHANNEL_TYPE}
+PUSHPLUS_CHANNEL_TYPE = "pushplus"
+VALID_CHANNEL_TYPES = {"wechat_robot", "webhook", SMS_TENCENT_CHANNEL_TYPE, PUSHPLUS_CHANNEL_TYPE}
 VALID_EVENT_TYPES = {"trigger", "recover", "ack", "close"}
 WECHAT_ROBOT_ENDPOINT_PREFIX = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
 
@@ -69,6 +70,13 @@ class NotifyChannelCreate(BaseModel):
                 raise ValueError("wechat robot endpoint missing key")
             return self
 
+        if self.channel_type == PUSHPLUS_CHANNEL_TYPE:
+            if len(self.endpoint) < 16:
+                raise ValueError("pushplus token is invalid")
+            if not self.secret:
+                raise ValueError("pushplus secret config is required")
+            return self
+
         if self.channel_type == SMS_TENCENT_CHANNEL_TYPE:
             tokens = [item.strip() for item in self.endpoint.split(",") if item.strip()]
             if not tokens:
@@ -87,6 +95,7 @@ class NotifyChannelResponse(BaseModel):
     name: str
     channel_type: str
     endpoint: str
+    secret: str | None = None
     is_enabled: bool
     created_at: datetime
 
@@ -96,7 +105,8 @@ class NotifyChannelResponse(BaseModel):
 
 class NotifyPolicyCreate(BaseModel):
     name: str
-    channel_id: int
+    channel_id: int | None = None
+    channel_ids: list[int] = Field(default_factory=list)
     min_alarm_level: int = 2
     event_types: str = "trigger,recover"
     is_enabled: bool = True
@@ -135,11 +145,26 @@ class NotifyPolicyCreate(BaseModel):
             raise ValueError("min_alarm_level must be between 1 and 4")
         return value
 
+    @model_validator(mode="after")
+    def normalize_channel_ids(self):
+        merged: list[int] = []
+        if self.channel_id is not None:
+            merged.append(self.channel_id)
+        for item in self.channel_ids:
+            if item not in merged:
+                merged.append(item)
+        if not merged:
+            raise ValueError("at least one notify channel is required")
+        self.channel_id = merged[0]
+        self.channel_ids = merged
+        return self
+
 
 class NotifyPolicyResponse(BaseModel):
     id: int
     name: str
     channel_id: int
+    channel_ids: list[int] = Field(default_factory=list)
     min_alarm_level: int
     event_types: str
     is_enabled: bool
