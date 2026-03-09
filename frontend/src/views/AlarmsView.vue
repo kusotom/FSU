@@ -19,7 +19,7 @@
       <el-table-column label="告警名称" min-width="160">
         <template #default="{ row }">{{ alarmNameLabel(row) }}</template>
       </el-table-column>
-      <el-table-column label="告警内容" min-width="280">
+      <el-table-column label="告警内容" min-width="240" show-overflow-tooltip>
         <template #default="{ row }">{{ alarmContentLabel(row) }}</template>
       </el-table-column>
       <el-table-column label="级别" width="100">
@@ -82,6 +82,7 @@ import { ElMessage } from "element-plus";
 import AppShell from "../components/AppShell.vue";
 import http from "../api/http";
 import { useAuthStore } from "../stores/auth";
+import { pointNameZhMap } from "../constants/pointMetadata";
 
 const auth = useAuthStore();
 const canAck = computed(() => auth.hasPermission("alarm.ack"));
@@ -108,6 +109,17 @@ const metricNameMap = {
   "Room Temperature": "机房温度",
   "Room Humidity": "机房湿度",
   "Battery Temperature": "电池温度",
+};
+
+const metricUnitMap = {
+  "Mains Voltage": "V",
+  "Room Temperature": "℃",
+  "Room Humidity": "%",
+  "Battery Temperature": "℃",
+  市电电压: "V",
+  机房温度: "℃",
+  机房湿度: "%",
+  电池温度: "℃",
 };
 
 const comparisonMap = {
@@ -151,9 +163,98 @@ const levelLabel = (level) => {
 
 const metricNameZh = (name) => metricNameMap[name] || name || "监控项";
 
+const humanizeAlarmName = (value) => {
+  return String(value || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (s) => s.toUpperCase())
+    .trim();
+};
+
+const inferMetricNameFromAlarmCode = (alarmCode) => {
+  const code = String(alarmCode || "").trim();
+  if (!code) return "";
+  const suffixes = ["_high", "_low", "_offline", "_fault", "_abnormal"];
+  let pointKey = code;
+  for (const suffix of suffixes) {
+    if (pointKey.endsWith(suffix)) {
+      pointKey = pointKey.slice(0, -suffix.length);
+      break;
+    }
+  }
+  return pointNameZhMap[pointKey] || metricNameMap[humanizeAlarmName(pointKey)] || "";
+};
+
+const conciseValue = (value) => {
+  const n = Number(value);
+  if (Number.isNaN(n)) return String(value ?? "-");
+  if (Math.abs(n) >= 100) return n.toFixed(1);
+  return n.toFixed(2);
+};
+
+const formatMetricValue = (metric, value) => {
+  const base = conciseValue(value);
+  const unit = metricUnitMap[metricNameZh(metric)] || metricUnitMap[metric] || "";
+  return `${base}${unit}`;
+};
+
+const inferAlarmDirection = (row, comparison = "") => {
+  const code = String(row?.alarm_code || "").toLowerCase();
+  const name = String(row?.alarm_name || "").toLowerCase();
+  const text = String(row?.content || "").toLowerCase();
+  const cmp = String(comparison || "").toLowerCase();
+  if (
+    cmp === "gt" ||
+    cmp === "ge" ||
+    code.endsWith("_high") ||
+    name.includes("high") ||
+    name.includes("过高") ||
+    text.includes("高于")
+  ) {
+    return "high";
+  }
+  if (
+    cmp === "lt" ||
+    cmp === "le" ||
+    code.endsWith("_low") ||
+    name.includes("low") ||
+    name.includes("过低") ||
+    text.includes("低于")
+  ) {
+    return "low";
+  }
+  return "abnormal";
+};
+
+const comparisonSummary = (row, metric, comparison, value) => {
+  const current = formatMetricValue(metric, value);
+  const direction = inferAlarmDirection(row, comparison);
+  if (direction === "high") {
+    return `当前${metricNameZh(metric)}过高（当前${current}）`;
+  }
+  if (direction === "low") {
+    return `当前${metricNameZh(metric)}过低（当前${current}）`;
+  }
+  return `当前${metricNameZh(metric)}异常（当前${current}）`;
+};
+
 const alarmNameLabel = (row) => {
   if (alarmNameMap[row.alarm_code]) return alarmNameMap[row.alarm_code];
+  if (row.alarm_code === "fsu_offline") return "设备离线告警";
+  const metricName = inferMetricNameFromAlarmCode(row.alarm_code);
+  if (metricName) {
+    if (String(row.alarm_code || "").endsWith("_high")) return `${metricName}过高`;
+    if (String(row.alarm_code || "").endsWith("_low")) return `${metricName}过低`;
+    if (String(row.alarm_code || "").endsWith("_fault")) return `${metricName}故障`;
+    if (String(row.alarm_code || "").endsWith("_offline")) return `${metricName}离线`;
+    if (String(row.alarm_code || "").endsWith("_abnormal")) return `${metricName}异常`;
+  }
   if (row.alarm_name === "FSU heartbeat timeout" || row.alarm_name === "设备心跳超时") return "设备心跳超时";
+  const rawName = String(row.alarm_name || "").trim();
+  if (/high/i.test(rawName) && metricName) return `${metricName}过高`;
+  if (/low/i.test(rawName) && metricName) return `${metricName}过低`;
+  if (/fault/i.test(rawName) && metricName) return `${metricName}故障`;
+  if (/offline/i.test(rawName) && metricName) return `${metricName}离线`;
+  if (/abnormal/i.test(rawName) && metricName) return `${metricName}异常`;
   return row.alarm_name || "未命名告警";
 };
 
@@ -167,42 +268,48 @@ const parseTimeText = (value) => {
 const alarmContentLabel = (row) => {
   const text = row.content || "";
   if (!text) return "-";
-  if (text.includes("触发规则") || text.includes("设备心跳超时")) return text;
+  if (text.includes("设备心跳超时")) return "设备心跳超时";
 
   let matched = text.match(/^FSU heartbeat stale:\s*device=([^\s]+)\s+last_seen=([^\s]+)\s+threshold_minutes=([\d.]+)/i);
   if (matched) {
-    return `设备心跳超时：设备 ${matched[1]}，最后心跳 ${parseTimeText(matched[2])}，阈值 ${matched[3]} 分钟`;
+    return `设备 ${matched[1]} 心跳超时`;
   }
 
   matched = text.match(/^(.+?)\s+rule=([^\s]+)\s+value=([-\d.]+)\s+comparison=([^\s]+)\s+threshold=([-\d.]+)/i);
   if (matched) {
-    const metric = metricNameZh(matched[1]);
-    const comparison = comparisonMap[matched[4]] || matched[4];
-    return `${metric}触发规则 ${matched[2]}，当前值 ${matched[3]}，比较方式 ${comparison}，阈值 ${matched[5]}`;
+    return comparisonSummary(row, matched[1], matched[4], matched[3]);
+  }
+
+  matched = text.match(/^(.+?)触发规则=([^\s]+)\s+当前值=([-\d.]+)/i);
+  if (matched) {
+    return comparisonSummary(row, matched[1], "", matched[3]);
   }
 
   matched = text.match(/^(.+?)\s+value=([-\d.]+)\s+exceeds\s+upper=([-\d.]+)/i);
   if (matched) {
-    const metric = metricNameZh(matched[1]);
-    return `${metric}当前值 ${matched[2]} 超过上限 ${matched[3]}`;
+    return `当前${metricNameZh(matched[1])}过高（当前${formatMetricValue(matched[1], matched[2])}）`;
   }
 
   matched = text.match(/^(.+?)\s+value=([-\d.]+)\s+below\s+lower=([-\d.]+)/i);
   if (matched) {
-    const metric = metricNameZh(matched[1]);
-    return `${metric}当前值 ${matched[2]} 低于下限 ${matched[3]}`;
+    return `当前${metricNameZh(matched[1])}过低（当前${formatMetricValue(matched[1], matched[2])}）`;
+  }
+
+  matched = text.match(/^(.+?)\s+当前值=([-\d.]+)/i);
+  if (matched) {
+    return comparisonSummary(row, matched[1], "", matched[2]);
   }
 
   let replaced = text;
   replaced = replaced
     .replace(/FSU heartbeat stale/gi, "设备心跳超时")
-    .replace(/rule=/gi, "规则=")
-    .replace(/value=/gi, "当前值=")
-    .replace(/comparison=/gi, "比较方式=")
-    .replace(/threshold=/gi, "阈值=")
-    .replace(/threshold_minutes=/gi, "阈值分钟=")
-    .replace(/device=/gi, "设备=")
-    .replace(/last_seen=/gi, "最后心跳=");
+    .replace(/rule=/gi, "")
+    .replace(/comparison=/gi, "")
+    .replace(/threshold_minutes=/gi, "")
+    .replace(/threshold=/gi, "")
+    .replace(/last_seen=/gi, "")
+    .replace(/device=/gi, "设备 ")
+    .replace(/value=/gi, "当前 ");
   for (const [en, zh] of Object.entries(metricNameMap)) {
     replaced = replaced.replace(new RegExp(en, "g"), zh);
   }
@@ -212,8 +319,10 @@ const alarmContentLabel = (row) => {
     .replace(/\blt\b/g, "小于")
     .replace(/\ble\b/g, "小于等于")
     .replace(/\beq\b/g, "等于")
-    .replace(/\bne\b/g, "不等于");
-  return replaced;
+    .replace(/\bne\b/g, "不等于")
+    .replace(/\s+/g, " ")
+    .trim();
+  return replaced.length > 48 ? `${replaced.slice(0, 48)}...` : replaced;
 };
 
 const levelTagType = (level) => {

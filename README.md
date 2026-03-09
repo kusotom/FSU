@@ -772,3 +772,16 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - Webhook：新增 `summary` 与 `trigger_value_text`
 - 修改文件：
   - `backend/app/services/notifier.py`
+
+### 15.15 告警中心文案与角色管理弹窗收口（2026-03-09）
+- 告警中心列表文案进一步精简：
+  - 告警名称优先按 `alarm_code` 映射中文
+  - 告警内容统一收敛为“当前{监控项}过高/过低/异常（当前{值}{单位}）”
+  - 对冗长原始规则文案做截断与噪音字段清理
+- 用户管理页角色管理弹窗调整：
+  - 角色列表弹窗加宽并支持内部滚动
+  - 角色编辑弹窗支持内部滚动，避免权限分组显示不全
+  - 说明和权限预览列增加溢出提示
+- 修改文件：
+  - `frontend/src/views/AlarmsView.vue`
+  - `frontend/src/views/UsersView.vue`

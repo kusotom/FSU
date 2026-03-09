@@ -507,11 +507,12 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="roleDialogVisible" title="角色管理" width="980px">
+    <el-dialog v-model="roleDialogVisible" title="角色管理" width="1100px" top="4vh" class="role-manager-dialog">
       <div class="role-toolbar">
         <el-input v-model="roleKeyword" clearable placeholder="搜索角色名或说明" style="max-width: 320px" />
         <el-button @click="openRoleCreate">新建角色</el-button>
       </div>
+      <div class="role-table-wrap">
       <el-table :data="filteredRoleDefs" stripe>
         <el-table-column label="角色" min-width="180">
           <template #default="{ row }">
@@ -521,11 +522,11 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="description" label="说明" min-width="180" />
+        <el-table-column prop="description" label="说明" min-width="180" show-overflow-tooltip />
         <el-table-column label="权限数" width="90">
           <template #default="{ row }">{{ (row.permissions || []).length }}</template>
         </el-table-column>
-        <el-table-column label="权限预览" min-width="260">
+        <el-table-column label="权限预览" min-width="260" show-overflow-tooltip>
           <template #default="{ row }">{{ summarizePermissions(row.permissions) }}</template>
         </el-table-column>
         <el-table-column label="类型" width="90">
@@ -539,9 +540,18 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
     </el-dialog>
 
-    <el-dialog v-model="roleEditVisible" :title="roleEditingId ? '编辑角色' : '新建角色'" width="920px" destroy-on-close>
+    <el-dialog
+      v-model="roleEditVisible"
+      :title="roleEditingId ? '编辑角色' : '新建角色'"
+      width="1040px"
+      top="4vh"
+      class="role-edit-dialog"
+      destroy-on-close
+    >
+      <div class="role-edit-body">
       <el-form label-width="96px">
         <div class="grid grid-two">
           <el-form-item label="角色标识" required>
@@ -599,6 +609,7 @@
           </el-checkbox-group>
         </div>
       </el-form>
+      </div>
       <template #footer>
         <el-button @click="roleEditVisible = false">取消</el-button>
         <el-button type="primary" @click="submitRole">保存</el-button>
@@ -1778,10 +1789,30 @@ watch(selectedTenantCode, async (tenantCode) => {
   font-size: 12px;
 }
 
+.role-table-wrap {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+}
+
+.role-edit-body {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.role-edit-body :deep(.el-form-item__content) {
+  min-width: 0;
+}
+
 .empty-inline,
 .empty-block,
 .empty-state {
   color: #94a3b8;
+}
+
+.role-manager-dialog :deep(.el-dialog),
+.role-edit-dialog :deep(.el-dialog) {
+  max-width: 96vw;
 }
 
 .empty-state {
@@ -1815,6 +1846,11 @@ watch(selectedTenantCode, async (tenantCode) => {
 
   .permission-grid {
     grid-template-columns: 1fr;
+  }
+
+  .role-table-wrap,
+  .role-edit-body {
+    max-height: calc(100vh - 180px);
   }
 }
 </style>
