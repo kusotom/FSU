@@ -72,6 +72,10 @@ fsu-platform/
     user-management-plan.md # 用户与租户权限规划（中文）
 ```
 
+文档文件：
+- `README.md`：项目总览、部署方式、模块能力说明。
+- `CHANGELOG.md`：持续记录重要功能变更与收口情况。
+
 ---
 
 ## 4. 多租户隔离与权限模型（重点）
