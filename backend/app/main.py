@@ -4,7 +4,7 @@ import logging
 import anyio.to_thread
 from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, text
+from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.api.router import api_router
@@ -67,6 +67,79 @@ def _ensure_notify_schema():
                 conn.execute(text(ddl))
     except Exception:
         logger.exception("notify schema ensure failed")
+
+
+def _ensure_sms_auth_schema():
+    ddl_list = [
+        "ALTER TABLE sys_user ADD COLUMN phone_country_code VARCHAR(8) DEFAULT '+86'",
+        "ALTER TABLE sys_user ADD COLUMN phone VARCHAR(20)",
+        "ALTER TABLE sys_user ADD COLUMN status VARCHAR(16) DEFAULT 'PENDING'",
+        "ALTER TABLE sys_user ADD COLUMN phone_verified_at TIMESTAMP",
+        "ALTER TABLE sys_user ADD COLUMN activated_at TIMESTAMP",
+        "ALTER TABLE sys_user ADD COLUMN last_login_at TIMESTAMP",
+        "ALTER TABLE sys_user ADD COLUMN locked_until TIMESTAMP",
+        "ALTER TABLE sys_user ADD COLUMN login_fail_count INTEGER DEFAULT 0",
+        "ALTER TABLE sys_user ADD COLUMN phone_login_enabled BOOLEAN DEFAULT TRUE",
+        """
+        CREATE TABLE IF NOT EXISTS sms_code_log (
+          id INTEGER PRIMARY KEY,
+          request_id VARCHAR(64) NOT NULL UNIQUE,
+          scene VARCHAR(16) NOT NULL,
+          phone_country_code VARCHAR(8) NOT NULL,
+          phone VARCHAR(20) NOT NULL,
+          user_id INTEGER NULL,
+          tenant_id INTEGER NULL,
+          code_hash VARCHAR(255) NOT NULL,
+          expires_at TIMESTAMP NOT NULL,
+          send_status VARCHAR(16) NOT NULL DEFAULT 'SUCCESS',
+          verify_status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          client_ip VARCHAR(64),
+          client_device_id VARCHAR(128),
+          sms_vendor VARCHAR(32),
+          vendor_message_id VARCHAR(128),
+          created_at TIMESTAMP NOT NULL,
+          sent_at TIMESTAMP,
+          verified_at TIMESTAMP
+        )
+        """,
+        "UPDATE sys_user SET phone_country_code = '+86' WHERE phone_country_code IS NULL",
+        "UPDATE sys_user SET status = 'ACTIVE' WHERE status IS NULL",
+        "UPDATE sys_user SET login_fail_count = 0 WHERE login_fail_count IS NULL",
+        "UPDATE sys_user SET phone_login_enabled = TRUE WHERE phone_login_enabled IS NULL",
+        "CREATE INDEX IF NOT EXISTS ix_sys_user_phone ON sys_user (phone)",
+        "CREATE INDEX IF NOT EXISTS ix_sys_user_status ON sys_user (status)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_sys_user_phone_country_phone ON sys_user (phone_country_code, phone) WHERE phone IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS ix_sms_code_log_phone ON sms_code_log (phone)",
+        "CREATE INDEX IF NOT EXISTS ix_sms_code_log_scene ON sms_code_log (scene)",
+        "CREATE INDEX IF NOT EXISTS ix_sms_code_log_verify_status ON sms_code_log (verify_status)",
+    ]
+    try:
+        with engine.begin() as conn:
+            existing_columns = {item["name"] for item in inspect(conn).get_columns("sys_user")}
+            for ddl in ddl_list:
+                ddl_normalized = " ".join(ddl.strip().split()).lower()
+                if "add column phone_country_code" in ddl_normalized and "phone_country_code" in existing_columns:
+                    continue
+                if "add column phone " in ddl_normalized and "phone" in existing_columns:
+                    continue
+                if "add column status " in ddl_normalized and "status" in existing_columns:
+                    continue
+                if "add column phone_verified_at" in ddl_normalized and "phone_verified_at" in existing_columns:
+                    continue
+                if "add column activated_at" in ddl_normalized and "activated_at" in existing_columns:
+                    continue
+                if "add column last_login_at" in ddl_normalized and "last_login_at" in existing_columns:
+                    continue
+                if "add column locked_until" in ddl_normalized and "locked_until" in existing_columns:
+                    continue
+                if "add column login_fail_count" in ddl_normalized and "login_fail_count" in existing_columns:
+                    continue
+                if "add column phone_login_enabled" in ddl_normalized and "phone_login_enabled" in existing_columns:
+                    continue
+                conn.execute(text(ddl))
+    except Exception:
+        logger.exception("sms auth schema ensure failed")
 
 
 def _ensure_timescaledb_defaults():
@@ -133,6 +206,7 @@ async def startup():
         _ensure_timescaledb_defaults()
         _ensure_runtime_indexes()
         _ensure_notify_schema()
+        _ensure_sms_auth_schema()
     db: Session = SessionLocal()
     try:
         seed_roles_and_admin(db)

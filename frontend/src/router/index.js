@@ -10,9 +10,25 @@ const UsersView = () => import("../views/UsersView.vue");
 const NotifyView = () => import("../views/NotifyView.vue");
 const AlarmRulesView = () => import("../views/AlarmRulesView.vue");
 
+const getStoredUser = () => {
+  const rawUser = localStorage.getItem("fsu_user");
+  if (!rawUser) return null;
+  try {
+    return JSON.parse(rawUser);
+  } catch (_e) {
+    return null;
+  }
+};
+
+const getDefaultHome = () => {
+  const user = getStoredUser();
+  if (user?.core_role === "platform_admin") return "/dashboard";
+  return user?.core_role === "company_admin" ? "/users" : "/dashboard";
+};
+
 const routes = [
   { path: "/login", component: LoginView },
-  { path: "/", redirect: "/dashboard" },
+  { path: "/", redirect: () => getDefaultHome() },
   { path: "/dashboard", component: DashboardView, meta: { auth: true, permission: "dashboard.view" } },
   { path: "/realtime", component: RealtimeView, meta: { auth: true, permission: "realtime.view" } },
   { path: "/sites-manage", component: SitesView, meta: { auth: true, permission: "site.view" } },
@@ -23,7 +39,7 @@ const routes = [
     component: AlarmRulesView,
     meta: { auth: true, anyPermissions: ["alarm_rule.template.view", "alarm_rule.tenant.view"] },
   },
-  { path: "/users", component: UsersView, meta: { auth: true, permission: "user.view" } },
+  { path: "/users", component: UsersView, meta: { auth: true, userManager: true } },
   {
     path: "/notify",
     component: NotifyView,
@@ -74,12 +90,16 @@ router.beforeEach((to, _from, next) => {
     next("/login");
     return;
   }
+  if (to.meta.userManager && !["platform_admin", "company_admin"].includes(getStoredUser()?.core_role || "")) {
+    next(getDefaultHome());
+    return;
+  }
   if (to.meta.permission && !permissions.includes(to.meta.permission)) {
-    next(to.path === "/dashboard" ? "/login" : "/dashboard");
+    next(getDefaultHome());
     return;
   }
   if (Array.isArray(to.meta.anyPermissions) && !to.meta.anyPermissions.some((item) => permissions.includes(item))) {
-    next(to.path === "/dashboard" ? "/login" : "/dashboard");
+    next(getDefaultHome());
     return;
   }
   next();

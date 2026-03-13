@@ -4,6 +4,7 @@ from app.api.routes import (
     alarm_rules,
     alarms,
     auth,
+    auth_sms,
     authz_roles,
     authz_users,
     custom_scope_sets,
@@ -22,10 +23,12 @@ from app.api.routes import (
     telemetry,
     tenants,
     users,
+    webhooks_unisms,
 )
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
+api_router.include_router(auth_sms.router)
 api_router.include_router(authz_roles.router)
 api_router.include_router(authz_users.router)
 api_router.include_router(projects.router)
@@ -46,3 +49,4 @@ api_router.include_router(alarm_rules.router)
 api_router.include_router(users.router)
 api_router.include_router(reports.router)
 api_router.include_router(notify.router)
+api_router.include_router(webhooks_unisms.router)

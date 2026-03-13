@@ -1,3 +1,4 @@
+from app.models.auth_sms import AuthSmsCode, AuthSmsDeliveryLog, SmsCodeLog
 from app.models.notify import NotifyChannel, NotifyPolicy
 from app.models.notify_admin import (
     AlarmPushLog,
@@ -55,4 +56,7 @@ __all__ = [
     "DeviceGroup",
     "CustomScopeSet",
     "CustomScopeItem",
+    "SmsCodeLog",
+    "AuthSmsCode",
+    "AuthSmsDeliveryLog",
 ]

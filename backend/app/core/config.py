@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     auto_create_schema: bool = True
     timescaledb_auto_enable: bool = True
 
+    sms_provider: str = "mock"
+    sms_phone_login_enabled: bool = True
     sms_tencent_enabled: bool = False
     sms_tencent_secret_id: str = ""
     sms_tencent_secret_key: str = ""
@@ -40,6 +42,26 @@ class Settings(BaseSettings):
     sms_tencent_template_id: str = ""
     sms_tencent_region: str = "ap-guangzhou"
     sms_tencent_template_mode: str = "single_text"
+    unisms_enabled: bool = False
+    unisms_access_key_id: str = ""
+    unisms_access_key_secret: str = ""
+    unisms_hmac_enabled: bool = True
+    unisms_base_url: str = "https://uni.apistd.com"
+    unisms_sms_signature: str = ""
+    unisms_login_template_id: str = ""
+    unisms_dlr_verify_enabled: bool = True
+    unisms_dlr_secret: str = ""
+    unisms_connect_timeout_seconds: int = 5
+    unisms_read_timeout_seconds: int = 10
+    sms_code_length: int = 6
+    sms_code_expire_seconds: int = 300
+    sms_send_interval_seconds: int = 60
+    sms_send_limit_per_10m: int = 5
+    sms_verify_max_attempts: int = 5
+    sms_login_fail_lock_threshold: int = 10
+    sms_login_lock_minutes: int = 30
+    sms_ip_limit_per_minute: int = 30
+    sms_ip_limit_per_hour: int = 200
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

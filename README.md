@@ -70,11 +70,15 @@ fsu-platform/
   scripts/                 # Windows 本地启动/检查/安装脚本
   docs/
     user-management-plan.md # 用户与租户权限规划（中文）
+    unisms-sms-task-record.md # UniSMS 短信接入任务记录
 ```
 
 文档文件：
 - `README.md`：项目总览、部署方式、模块能力说明。
 - `CHANGELOG.md`：持续记录重要功能变更与收口情况。
+- `docs/unisms-sms-task-record.md`：UniSMS 接入执行记录与剩余工作。
+- `backend/app/integrations/unisms/README.md`：UniSMS 供应商适配层说明。
+- `backend/.env.unisms.example`：UniSMS 实发模式环境变量模板。
 
 ---
 
@@ -82,41 +86,45 @@ fsu-platform/
 
 ### 4.1 设计原则
 
-平台采用“多租户隔离 + 总部治理”模型：
-- 每个租户（公司）只看/只管自己的站点、设备、数据、告警和策略。
-- 集团/总部角色可跨租户查看汇总与模板，但不直接改子公司生产策略。
-- 管理员保留全局运维能力（用于平台治理和应急）。
+当前版本采用简化模型：
+- `platform_admin`：负责创建公司和公司管理员，同时保留全局只读视角，可查看所有公司的项目、站点、告警和监控数据。
+- `company_admin`：只负责管理本公司的员工、权限和数据范围。
+- `employee`：只访问自己被授权的功能和数据。
+
+角色只表达管理层级，不承载复杂岗位差异。业务差异通过权限点组合实现，数据可见范围通过数据范围实现。
 
 ### 4.2 当前权限实现
 
-当前版本已切换为“角色权限 + 数据范围”驱动：
-- 角色负责功能权限，权限点统一由后端判定。
-- 数据范围负责可见租户、站点、区域，不再依赖前端硬编码角色名判断。
-- 旧内置角色 `admin / hq_noc / sub_noc / operator` 仍保留，但主要作为默认权限模板。
+当前后端访问控制已收口为“核心角色 + 权限点 + 数据范围”：
+- 核心角色：`platform_admin / company_admin / employee`
+- 权限点：控制页面访问和业务动作
+- 数据范围：控制租户、站点、设备组等可见数据
 
-当前默认权限点包括：
+第一批常用权限点包括：
 - 页面访问：`dashboard.view`、`realtime.view`、`site.view`、`alarm.view`、`history.view`
-- 告警动作：`alarm.ack`、`alarm.close`
-- 规则治理：`alarm_rule.template.view/manage`、`alarm_rule.tenant.view/manage`
-- 通知治理：`notify.channel.view/manage`、`notify.policy.view/manage`
-- 站点治理：`site.create`、`site.update`
-- 账号治理：`user.view`、`user.manage`
+- 告警动作：`alarm.view`、`alarm.handle`
+- 站点治理：`site.view`、`site.manage`
+- 规则治理：`rule.view`、`rule.manage`
+- 通知治理：`notify.view`、`notify.manage`
+- 报表导出：`report.export`
+- 员工管理：`user.manage_company`
 
-### 4.3 权限边界矩阵
+兼容说明：
+- 历史数据里仍可能看到 `admin / hq_noc / sub_noc / operator`。
+- 运行时这些旧角色会映射到新的核心角色或仅作为兼容数据保留，不再建议继续新增和分配。
 
-| 能力 | admin | hq_noc | sub_noc |
-|---|---|---|---|
-| 跨租户查看站点/数据/告警 | 是 | 是 | 否 |
-| 模板规则管理（`/alarm-rules`） | 是 | 是 | 否 |
-| 租户策略查看（`/alarm-rules/tenant-policies`） | 是（需指定 `tenant_code`） | 是（需指定 `tenant_code`） | 是（仅本租户） |
-| 租户策略修改（`PUT tenant-policies`） | 是 | 否 | 是（仅本租户） |
-| 站点创建 | 是（可指定租户） | 否 | 是（仅本租户） |
-| 告警确认/关闭 | 是 | 是 | 是（仅本租户） |
-| 用户与角色管理 | 是 | 否 | 否 |
+### 4.3 职责边界
+
+| 角色 | 职责边界 |
+|---|---|
+| `platform_admin` | 创建公司、创建公司管理员、全局只读查看所有公司的项目/站点/告警/监控数据 |
+| `company_admin` | 管理本公司员工、分配员工权限模板、配置员工数据范围 |
+| `employee` | 使用已授权页面和功能，访问已授权数据 |
 
 说明：
-- 全局角色（`admin` / `hq_noc`）查询租户策略时，必须显式传 `tenant_code`，避免误操作。
-- `hq_noc` 不能创建站点，也不能修改租户策略，符合“总部治理不直接改生产策略”的边界。
+- 平台管理员默认具备全局只读权限，便于总部视角查看所有项目和站点，但不参与公司内部日常配置维护。
+- 公司管理员不能跨公司管理账号，也不能创建平台管理员。
+- 普通员工无用户管理权限。
 
 ---
 
@@ -134,7 +142,7 @@ Copy-Item .env.example .env
 # 安装依赖
 pip install -r requirements.txt
 
-# （可选）如果你希望显式执行迁移
+# （可选）新库可显式执行迁移
 python -m alembic upgrade head
 
 # （可选）如果你使用 init SQL 初始化 PostgreSQL，再执行权限 seed
@@ -147,6 +155,10 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 健康检查：
 - `http://127.0.0.1:8000/health`
+
+升级说明：
+- 全新数据库可以直接执行 `python -m alembic upgrade head`。
+- 已由 `AUTO_CREATE_SCHEMA=true` 自动建表跑起来的旧环境，先不要盲目重放全部历史迁移；需要先核对实际表结构，再决定是补迁移还是使用 `alembic stamp` 对齐版本链。
 
 ### 5.2 启动前端
 
@@ -173,11 +185,18 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 
 ## 6. 默认账号
 
-| 用户名 | 密码 | 角色说明 |
+当前默认演示账号已切换为手机号登录：
+
+| 用户名 | 手机号 | 说明 |
 |---|---|---|
-| `admin` | `admin123` | 平台管理员 |
-| `hq_noc` | `noc12345` | 总部监控组（跨租户查看、模板治理） |
-| `suba_noc` | `noc12345` | 子公司 A 监控组（仅本租户） |
+| `admin` | `13800000001` | 平台管理员 |
+| `suba_admin` | `13800000002` | 公司管理员 |
+| `emp_demo` | `13800000003` | 普通员工 |
+
+说明：
+- 当前前端默认使用手机号验证码登录。
+- 若 `SMS_PROVIDER=mock`，系统走本地兼容链路。
+- 若 `SMS_PROVIDER=unisms` 且 `UNISMS_ENABLED=true`，系统走 UniSMS 模板短信发送。
 
 权限规划文档：
 - `docs/user-management-plan.md`
@@ -191,14 +210,18 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 ### 7.1 认证与会话
 
 - `POST /auth/login`：登录获取 JWT。
-- `GET /auth/me`：获取当前用户、角色、权限点、数据范围、角色绑定。
+- `GET /auth/me`：获取当前用户、核心角色、权限点、数据范围。
+- `POST /auth/sms/send-code`：发送手机号登录验证码。
+- `POST /auth/sms/send`：兼容旧链路的发码接口。
+- `POST /auth/sms/login`：手机号验证码登录/激活。
 - `WS /ws/realtime?token=JWT`：实时推送通道。
 
 ### 7.2 租户与站点
 
-- `GET /tenants`：查询可见租户列表（按权限裁剪）。
+- `GET /tenants`：查询可见公司列表（按权限裁剪）。
+- `GET /projects`：查询可见项目列表；平台管理员默认可查看所有公司下的项目。
 - `GET /sites`：查询可见站点列表（按权限裁剪）。
-- `POST /sites`：创建站点（`admin` 全局可建，`sub_noc` 仅本租户可建）。
+- `POST /sites`：创建站点（平台管理员可指定公司，公司管理员仅可操作本公司资源）。
 
 ### 7.3 数据采集与查询
 
@@ -217,22 +240,22 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 
 ### 7.5 规则与策略
 
-- `GET /alarm-rules`：模板规则列表（`admin/hq_noc`）。
-- `POST /alarm-rules`：新增模板规则（`admin/hq_noc`）。
-- `PUT /alarm-rules/{id}`：修改模板规则（`admin/hq_noc`）。
-- `GET /alarm-rules/tenant-policies`：查看租户策略（`admin/hq_noc/sub_noc`）。
-  - `admin/hq_noc` 必须传 `tenant_code`。
-- `PUT /alarm-rules/tenant-policies/{id}`：修改租户策略（`admin/sub_noc`）。
+- `GET /alarm-rules`：模板规则列表（按权限裁剪）。
+- `POST /alarm-rules`：新增模板规则（按权限裁剪）。
+- `PUT /alarm-rules/{id}`：修改模板规则（按权限裁剪）。
+- `GET /alarm-rules/tenant-policies`：查看公司策略（平台管理员可指定公司，公司管理员默认仅本公司）。
+- `PUT /alarm-rules/tenant-policies/{id}`：修改公司策略（按权限裁剪）。
 
 ### 7.6 用户与角色
 
-- `GET /users`：用户列表（`admin`）。
-- `POST /users`：创建用户（`admin`）。
-- `GET /users/roles`：角色名列表（`admin`）。
-- `GET /users/role-defs`：角色定义列表（`admin`）。
-- `POST /users/role-defs`：新增角色定义（`admin`）。
-- `PUT /users/role-defs/{id}`：修改角色定义（`admin`）。
-- `DELETE /users/role-defs/{id}`：删除角色定义（`admin`，内置/被引用角色会被保护）。
+- `GET /users`：用户列表（平台管理员看公司管理员，公司管理员看本公司员工）。
+- `POST /users`：创建用户（平台管理员创建公司管理员，公司管理员创建员工）。
+- `PUT /users/{id}`：更新用户基本信息、权限和数据范围。
+- `GET /users/meta`：获取核心角色、权限模板、权限点、数据范围选项。
+
+说明：
+- 当前仍保留 `GET/POST/PUT/DELETE /users/role-defs` 兼容接口，但不再建议作为主流程使用。
+- 新主流程是“少量核心角色 + 权限模板 + 数据范围”。
 
 ### 7.7 通知与报表
 
@@ -304,6 +327,61 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 - `SMS_TENCENT_TEMPLATE_MODE`：模板参数模式，支持：
   - `single_text`：单变量模板（推荐，模板只放 `{1}`）。
   - `alarm_v6`：六变量模板（事件/站点/设备/监控项/级别/状态）。
+
+### 8.6 手机号登录与 UniSMS
+
+- `SMS_PROVIDER`：短信服务商开关，当前支持：
+  - `mock`
+  - `unisms`
+- `SMS_PHONE_LOGIN_ENABLED`：是否启用手机号验证码登录主链路。
+- `SMS_CODE_LENGTH`：验证码位数，默认 `6`。
+- `SMS_CODE_EXPIRE_SECONDS`：验证码有效期，默认 `300` 秒。
+- `SMS_SEND_INTERVAL_SECONDS`：同手机号重发间隔，默认 `60` 秒。
+- `SMS_SEND_LIMIT_PER_10M`：同手机号 10 分钟发送次数上限。
+- `SMS_VERIFY_MAX_ATTEMPTS`：单验证码最大输错次数。
+- `SMS_LOGIN_FAIL_LOCK_THRESHOLD`：账号累计失败阈值。
+- `SMS_LOGIN_LOCK_MINUTES`：达到阈值后的锁定时长。
+- `SMS_IP_LIMIT_PER_MINUTE` / `SMS_IP_LIMIT_PER_HOUR`：IP 限流阈值。
+
+UniSMS 配置项：
+
+- `UNISMS_ENABLED`
+- `UNISMS_ACCESS_KEY_ID`
+- `UNISMS_ACCESS_KEY_SECRET`
+- `UNISMS_HMAC_ENABLED`
+- `UNISMS_SMS_SIGNATURE`
+- `UNISMS_LOGIN_TEMPLATE_ID`
+- `UNISMS_DLR_VERIFY_ENABLED`
+- `UNISMS_DLR_SECRET`
+
+推荐做法：
+
+- 本地调试继续使用 `backend/.env.example`
+- 准备切到 UniSMS 实发时，先参考 `backend/.env.unisms.example`
+- 把正式参数写入 `backend/.env`
+- 重启后端后再联调发码和回执
+
+UniSMS 相关接口：
+
+- `POST /api/v1/auth/sms/send-code`
+- `POST /api/v1/auth/sms/login`
+- `POST /api/v1/webhooks/unisms/dlr`
+
+当前项目状态：
+
+- 骨架、双表模型、DLR 验签与回执落库已完成。
+- 若未配置正式 UniSMS 参数，系统会自动回退到 mock/兼容链路。
+
+切换到 UniSMS 实发的最小步骤：
+
+1. 用 `backend/.env.unisms.example` 作为参考补齐 `backend/.env`
+2. 确认 `SMS_PROVIDER=unisms`
+3. 确认 `UNISMS_ENABLED=true`
+4. 配好 `UNISMS_ACCESS_KEY_ID / UNISMS_ACCESS_KEY_SECRET / UNISMS_SMS_SIGNATURE / UNISMS_LOGIN_TEMPLATE_ID / UNISMS_DLR_SECRET`
+5. 重启后端
+6. 调用 `POST /api/v1/auth/sms/send-code`
+7. 检查 `auth_sms_code` 和 `auth_sms_delivery_log`
+- 详细执行记录见 `docs/unisms-sms-task-record.md`。
 
 ---
 
@@ -491,9 +569,10 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 
 排查顺序：
 1. 后端是否启动：访问 `http://127.0.0.1:8000/health`。
-2. 是否使用默认账号（见“默认账号”章节）。
-3. 数据库是否连通，启动日志是否有迁移/建表错误。
-4. `SECRET_KEY` 变更后，旧 token 失效，需重新登录。
+2. 是否使用系统中已存在的手机号，且账号状态不是 `DISABLED / LOCKED`。
+3. 如果走短信登录，先确认 `/api/v1/auth/sms/send-code` 是否正常返回。
+4. 数据库是否连通，启动日志是否有迁移/建表错误。
+5. `SECRET_KEY` 变更后，旧 token 失效，需重新登录。
 
 ### 12.2 页面无数据或实时曲线不显示
 
@@ -512,8 +591,9 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 ### 12.4 权限看起来异常
 
 1. 检查 `GET /api/v1/auth/me` 返回的 `roles`、`tenant_codes`、`tenant_roles`。
-2. 确认角色是否绑定到了正确租户（如 `sub_noc` 不可绑定总部租户）。
-3. 当前策略规则：`hq_noc` 可看策略但不能改；`sub_noc` 仅能改本租户策略。
+2. 确认 `core_role` 是否正确，以及是否被错误地创建到了其他公司。
+3. 检查 `permissions` 和 `data_scopes` 是否符合预期。
+4. 平台管理员只负责公司和公司管理员，普通员工需要单独授权业务权限。
 
 ---
 
@@ -636,7 +716,7 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 当前版本不会覆盖既有角色和数据范围
 - `/users` 主链路已加租户边界校验：
   - 公司管理员只能看到本公司账号
-  - 公司管理员不能给员工分配 `admin / hq_noc`
+  - 公司管理员不能给员工分配平台级核心角色或历史兼容角色
   - 公司管理员不能借接口把用户创建到其他公司
 - 新增最小审计记录：
   - 新表 `sys_operation_log`
@@ -837,10 +917,10 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - `notify.group.manage`
   - `notify.rule.view`
   - `notify.rule.manage`
-- 内置角色默认权限已同步扩展：
-  - `admin`
-  - `hq_noc`
-  - `sub_noc`
+- 历史内置角色的兼容默认权限已同步扩展：
+  - `platform_admin` 兼容映射
+  - `company_admin` 兼容映射
+  - 历史角色别名映射
 - 新增后端接口：
   - `GET/POST/PUT/DELETE /api/v1/notify-receivers?tenant_code=...`
   - `GET/POST/PUT/DELETE /api/v1/notify-groups?tenant_code=...`

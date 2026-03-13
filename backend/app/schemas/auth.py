@@ -24,7 +24,10 @@ class UserRoleBindingResponse(BaseModel):
 class UserMeResponse(BaseModel):
     id: int
     username: str
+    phone: str | None = None
     full_name: str | None
+    status: str
+    core_role: str
     roles: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
     scopes: list[UserDataScopeView] = Field(default_factory=list)

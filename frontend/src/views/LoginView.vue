@@ -1,20 +1,24 @@
-﻿<template>
+<template>
   <div class="login-wrap">
     <div class="panel">
       <h1>动环监控平台</h1>
-      <p>默认账号：admin/admin123，hq_noc/noc12345，suba_noc/noc12345</p>
+      <p>仅限已创建账号登录。默认演示手机号：13800000001、13800000002、13800000003</p>
       <el-form :model="form" @submit.prevent>
         <el-form-item>
-          <el-input v-model="form.username" placeholder="请输入用户名" />
+          <el-input v-model="form.phone" placeholder="请输入手机号" maxlength="20" />
         </el-form-item>
         <el-form-item>
-          <el-input
-            v-model="form.password"
-            type="password"
-            show-password
-            placeholder="请输入密码"
-            @keyup.enter="submit"
-          />
+          <div class="code-row">
+            <el-input
+              v-model="form.code"
+              placeholder="请输入短信验证码"
+              maxlength="6"
+              @keyup.enter="submit"
+            />
+            <el-button :disabled="sending || countdown > 0 || !form.phone" @click="sendCode">
+              {{ countdown > 0 ? `${countdown}s 后重发` : "发送验证码" }}
+            </el-button>
+          </div>
         </el-form-item>
         <el-button type="primary" :loading="loading" style="width: 100%" @click="submit">
           登录
@@ -25,7 +29,7 @@
 </template>
 
 <script setup>
-import { reactive, ref } from "vue";
+import { onBeforeUnmount, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth";
@@ -33,20 +37,67 @@ import { useAuthStore } from "../stores/auth";
 const auth = useAuthStore();
 const router = useRouter();
 const loading = ref(false);
-const form = reactive({ username: "admin", password: "admin123" });
+const sending = ref(false);
+const countdown = ref(0);
+const form = reactive({ phone: "13800000001", code: "" });
+
+let timerId = null;
+
+const startCountdown = (seconds = 60) => {
+  countdown.value = seconds;
+  if (timerId) window.clearInterval(timerId);
+  timerId = window.setInterval(() => {
+    countdown.value -= 1;
+    if (countdown.value <= 0) {
+      window.clearInterval(timerId);
+      timerId = null;
+    }
+  }, 1000);
+};
+
+const sendCode = async () => {
+  if (!form.phone.trim()) {
+    ElMessage.error("请输入手机号");
+    return;
+  }
+  sending.value = true;
+  try {
+    const data = await auth.sendSmsCode(form.phone.trim());
+    startCountdown(data?.resend_after_seconds || 60);
+    if (data?.debug_code) {
+      ElMessage.success(`开发验证码：${data.debug_code}`);
+    } else {
+      ElMessage.success(data?.message || "验证码已发送");
+    }
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || "发送验证码失败");
+  } finally {
+    sending.value = false;
+  }
+};
 
 const submit = async () => {
-  if (!form.username || !form.password) return;
+  if (!form.phone.trim() || !form.code.trim()) {
+    ElMessage.error("请输入手机号和验证码");
+    return;
+  }
   loading.value = true;
   try {
-    await auth.login(form.username, form.password);
-    router.push("/dashboard");
-  } catch (e) {
-    ElMessage.error(e.response?.data?.detail || "登录失败");
+    const data = await auth.loginBySms(form.phone.trim(), form.code.trim());
+    if (data?.user?.first_login_activated) {
+      ElMessage.success("账号已激活");
+    }
+    router.push(auth.defaultHome);
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || "登录失败");
   } finally {
     loading.value = false;
   }
 };
+
+onBeforeUnmount(() => {
+  if (timerId) window.clearInterval(timerId);
+});
 </script>
 
 <style scoped>
@@ -74,5 +125,19 @@ h1 {
 p {
   margin: 0 0 18px;
   color: #64748b;
+  line-height: 1.6;
+}
+
+.code-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  width: 100%;
+}
+
+@media (max-width: 520px) {
+  .code-row {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

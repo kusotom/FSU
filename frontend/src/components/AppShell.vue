@@ -21,12 +21,15 @@
       >
         通知策略
       </router-link>
-      <router-link v-if="auth.hasPermission('user.view')" class="nav-link" to="/users">用户管理</router-link>
+      <router-link v-if="auth.canManageUsers" class="nav-link" to="/users">用户管理</router-link>
     </aside>
     <main class="content">
       <header class="topbar">
         <div class="user">
           <span>{{ auth.user?.full_name || auth.user?.username || "未登录" }}</span>
+          <span v-if="auth.coreRole === 'platform_admin'">平台管理员</span>
+          <span v-else-if="auth.coreRole === 'company_admin'">公司管理员</span>
+          <span v-else-if="auth.coreRole === 'employee'">普通员工</span>
           <span v-if="auth.tenantCodes.length">租户 {{ auth.tenantCodes.join(" / ") }}</span>
           <el-button link type="primary" @click="logout">退出登录</el-button>
         </div>

@@ -18,6 +18,7 @@ http.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem("fsu_token");
+      localStorage.removeItem("fsu_user");
       if (!window.location.pathname.includes("/login")) {
         window.location.href = "/login";
       }

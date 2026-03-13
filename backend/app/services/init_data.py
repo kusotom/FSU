@@ -14,6 +14,9 @@ from app.models.tenant import Tenant, TenantSiteBinding, UserTenantRole
 from app.models.user import Role, RolePermission, User, UserDataScope
 from app.services.access_control import (
     BUILTIN_ROLE_DEFAULT_PERMISSIONS,
+    CORE_ROLE_COMPANY,
+    CORE_ROLE_EMPLOYEE,
+    CORE_ROLE_PLATFORM,
     DEFAULT_SUB_TENANT_CODE,
     HQ_TENANT_CODE,
     ensure_site_tenant_binding,
@@ -461,6 +464,18 @@ def _ensure_role(db: Session, name: str, description: str) -> Role:
     return item
 
 
+def _ensure_permission_role(db: Session, user: User) -> Role:
+    role_name = f"user_perm_{user.id}"
+    item = db.scalar(select(Role).where(Role.name == role_name))
+    if item is None:
+        item = Role(name=role_name, description=f"用户权限角色#{user.id}")
+        db.add(item)
+        db.flush()
+        return item
+    item.description = f"用户权限角色#{user.id}"
+    return item
+
+
 def _sync_role_permissions(db: Session, role: Role, permission_keys: set[str]):
     permission_keys = expand_permissions(permission_keys)
     existing = {item.permission_key: item for item in role.permissions}
@@ -500,6 +515,9 @@ def _ensure_user(
     username: str,
     password: str,
     full_name: str,
+    phone: str | None = None,
+    phone_country_code: str = "+86",
+    status: str = "ACTIVE",
     is_active: bool = True,
 ) -> User:
     item = db.scalar(select(User).where(User.username == username))
@@ -507,7 +525,10 @@ def _ensure_user(
         item = User(
             username=username,
             password_hash=get_password_hash(password),
+            phone_country_code=phone_country_code,
+            phone=phone,
             full_name=full_name,
+            status=status,
             is_active=is_active,
         )
         db.add(item)
@@ -515,7 +536,11 @@ def _ensure_user(
         return item
     if not item.password_hash:
         item.password_hash = get_password_hash(password)
+    if phone is not None:
+        item.phone_country_code = phone_country_code
+        item.phone = phone
     item.full_name = full_name
+    item.status = status
     item.is_active = is_active
     return item
 
@@ -524,6 +549,10 @@ def _bind_global_role(user: User, role: Role):
     exists = any(item.id == role.id for item in user.roles)
     if not exists:
         user.roles.append(role)
+
+
+def _sync_user_roles(user: User, roles: list[Role]):
+    user.roles = roles
 
 
 def _bind_tenant_role(db: Session, *, user: User, role: Role, tenant: Tenant):
@@ -547,51 +576,59 @@ def _bind_tenant_role(db: Session, *, user: User, role: Role, tenant: Tenant):
 
 
 def seed_roles_and_admin(db: Session):
-    hq, sub_a = seed_tenants(db)
+    _hq, sub_a = seed_tenants(db)
 
-    admin_role = _ensure_role(db, "admin", "\u7cfb\u7edf\u7ba1\u7406\u5458")
-    operator_role = _ensure_role(db, "operator", "\u8fd0\u7ef4\u4eba\u5458")
-    hq_noc_role = _ensure_role(db, "hq_noc", "\u603b\u90e8\u76d1\u63a7\u7ec4")
-    sub_noc_role = _ensure_role(db, "sub_noc", "\u5b50\u516c\u53f8\u76d1\u63a7\u7ec4")
-    _sync_role_permissions(db, admin_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS["admin"])
-    _sync_role_permissions(db, operator_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS["operator"])
-    _sync_role_permissions(db, hq_noc_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS["hq_noc"])
-    _sync_role_permissions(db, sub_noc_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS["sub_noc"])
+    platform_role = _ensure_role(db, CORE_ROLE_PLATFORM, "平台管理员")
+    company_role = _ensure_role(db, CORE_ROLE_COMPANY, "公司管理员")
+    employee_role = _ensure_role(db, CORE_ROLE_EMPLOYEE, "普通员工")
+    _sync_role_permissions(db, platform_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS[CORE_ROLE_PLATFORM])
+    _sync_role_permissions(db, company_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS[CORE_ROLE_COMPANY])
+    _sync_role_permissions(db, employee_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS[CORE_ROLE_EMPLOYEE])
 
     admin = _ensure_user(
         db,
         username="admin",
         password="admin123",
-        full_name="\u7cfb\u7edf\u7ba1\u7406\u5458",
+        full_name="平台管理员",
     )
-    _bind_global_role(admin, admin_role)
-    _bind_global_role(admin, operator_role)
-    _bind_global_role(admin, hq_noc_role)
-    _bind_tenant_role(db, user=admin, role=admin_role, tenant=hq)
-    _bind_tenant_role(db, user=admin, role=hq_noc_role, tenant=hq)
+    _sync_user_roles(admin, [platform_role])
+    admin.tenant_roles.clear()
     _set_user_data_scopes(db, admin, [("all", "*", "全部数据")])
 
-    hq_noc = _ensure_user(
+    suba_admin = _ensure_user(
         db,
-        username="hq_noc",
-        password="noc12345",
-        full_name="\u603b\u90e8NOC",
+        username="suba_admin",
+        password="admin123",
+        full_name="A公司管理员",
     )
-    _bind_global_role(hq_noc, operator_role)
-    _bind_global_role(hq_noc, hq_noc_role)
-    _bind_tenant_role(db, user=hq_noc, role=hq_noc_role, tenant=hq)
-    _set_user_data_scopes(db, hq_noc, [("all", "*", "全部数据")])
+    suba_permission_role = _ensure_permission_role(db, suba_admin)
+    _sync_role_permissions(db, suba_permission_role, {"site.view", "user.manage_company"})
+    _sync_user_roles(suba_admin, [company_role, suba_permission_role])
+    suba_admin.tenant_roles.clear()
+    _bind_tenant_role(db, user=suba_admin, role=company_role, tenant=sub_a)
+    _set_user_data_scopes(db, suba_admin, [("tenant", sub_a.code, sub_a.name)])
 
-    suba_noc = _ensure_user(
+    employee_demo = _ensure_user(
         db,
-        username="suba_noc",
-        password="noc12345",
-        full_name="\u5b50\u516c\u53f8A NOC",
+        username="emp_demo",
+        password="emp12345",
+        full_name="示例员工",
     )
-    _bind_global_role(suba_noc, operator_role)
-    _bind_global_role(suba_noc, sub_noc_role)
-    _bind_tenant_role(db, user=suba_noc, role=sub_noc_role, tenant=sub_a)
-    _set_user_data_scopes(db, suba_noc, [("tenant", sub_a.code, sub_a.name)])
+    employee_permission_role = _ensure_permission_role(db, employee_demo)
+    _sync_role_permissions(
+        db,
+        employee_permission_role,
+        {"dashboard.view", "realtime.view", "history.view", "alarm.view", "site.view"},
+    )
+    _sync_user_roles(employee_demo, [employee_role, employee_permission_role])
+    employee_demo.tenant_roles.clear()
+    _bind_tenant_role(db, user=employee_demo, role=employee_role, tenant=sub_a)
+    _set_user_data_scopes(db, employee_demo, [("tenant", sub_a.code, sub_a.name)])
+
+    for legacy_username in ("hq_noc", "suba_noc"):
+        legacy_user = db.scalar(select(User).where(User.username == legacy_username))
+        if legacy_user is not None:
+            legacy_user.is_active = False
 
 
 def seed_alarm_rules(db: Session):
@@ -718,7 +755,7 @@ def seed_demo_site_data(db: Session):
         exists.high_threshold = high
         exists.low_threshold = low
 
-    admin_user = db.scalar(select(User).where(User.username == "suba_noc"))
+    admin_user = db.scalar(select(User).where(User.username == "suba_admin"))
     default_scope = db.scalar(
         select(CustomScopeSet).where(
             CustomScopeSet.tenant_id == sub_a.id,
@@ -755,3 +792,65 @@ def seed_demo_site_data(db: Session):
     )
     for site_id in unbound_site_ids:
         ensure_site_tenant_binding(db, site_id=site_id, tenant_id=sub_a.id)
+
+
+def seed_roles_and_admin(db: Session):
+    _hq, sub_a = seed_tenants(db)
+
+    platform_role = _ensure_role(db, CORE_ROLE_PLATFORM, "平台管理员")
+    company_role = _ensure_role(db, CORE_ROLE_COMPANY, "公司管理员")
+    employee_role = _ensure_role(db, CORE_ROLE_EMPLOYEE, "普通员工")
+    _sync_role_permissions(db, platform_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS[CORE_ROLE_PLATFORM])
+    _sync_role_permissions(db, company_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS[CORE_ROLE_COMPANY])
+    _sync_role_permissions(db, employee_role, BUILTIN_ROLE_DEFAULT_PERMISSIONS[CORE_ROLE_EMPLOYEE])
+
+    admin = _ensure_user(
+        db,
+        username="admin",
+        password="admin123",
+        full_name="平台管理员",
+        phone="13800000001",
+        status="ACTIVE",
+    )
+    _sync_user_roles(admin, [platform_role])
+    admin.tenant_roles.clear()
+    _set_user_data_scopes(db, admin, [("all", "*", "全部数据")])
+
+    suba_admin = _ensure_user(
+        db,
+        username="suba_admin",
+        password="admin123",
+        full_name="A公司管理员",
+        phone="13800000002",
+        status="ACTIVE",
+    )
+    suba_permission_role = _ensure_permission_role(db, suba_admin)
+    _sync_role_permissions(db, suba_permission_role, {"site.view", "user.manage_company"})
+    _sync_user_roles(suba_admin, [company_role, suba_permission_role])
+    suba_admin.tenant_roles.clear()
+    _bind_tenant_role(db, user=suba_admin, role=company_role, tenant=sub_a)
+    _set_user_data_scopes(db, suba_admin, [("tenant", sub_a.code, sub_a.name)])
+
+    employee_demo = _ensure_user(
+        db,
+        username="emp_demo",
+        password="emp12345",
+        full_name="示例员工",
+        phone="13800000003",
+        status="ACTIVE",
+    )
+    employee_permission_role = _ensure_permission_role(db, employee_demo)
+    _sync_role_permissions(
+        db,
+        employee_permission_role,
+        {"dashboard.view", "realtime.view", "history.view", "alarm.view", "site.view"},
+    )
+    _sync_user_roles(employee_demo, [employee_role, employee_permission_role])
+    employee_demo.tenant_roles.clear()
+    _bind_tenant_role(db, user=employee_demo, role=employee_role, tenant=sub_a)
+    _set_user_data_scopes(db, employee_demo, [("tenant", sub_a.code, sub_a.name)])
+
+    for legacy_username in ("hq_noc", "suba_noc"):
+        legacy_user = db.scalar(select(User).where(User.username == legacy_username))
+        if legacy_user is not None:
+            legacy_user.is_active = False
