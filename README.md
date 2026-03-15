@@ -1085,3 +1085,20 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - `backend/app/api/routes/notify_oncall.py`
   - `backend/app/api/routes/notify_push_logs.py`
   - `frontend/src/views/NotifyView.vue`
+
+### 15.21 DTU 接入网关与 README 日期记录要求（2026-03-15）
+- 平台新增 DTU 接入能力：
+  - 新增 `POST /api/v1/ingest/dtu`
+  - 新增 `backend/scripts/dtu_ingest_gateway.py`
+  - 支持 `line / idle` 两种 TCP 拆帧模式
+  - 原始 DTU 报文可落盘到 `backend/logs/dtu-raw/`
+- 协议适配层已扩展为可注册结构：
+  - 当前内置 `json_line`
+  - 当前内置 `telemetry_json`
+  - 当前内置 `estone_json`
+  - 后续新增厂商 DTU 私有协议时，优先在 `backend/app/services/protocol_adapters.py` 内补解析器
+- `FSU-2808IM` 采集脚本保留用于协议摸底与存量兼容：
+  - `backend/scripts/fsu_2808im_bridge.py`
+- README 维护约定更新：
+  - 以后每次修改 `README.md`，都需要在“最近改动说明”中补充明确日期
+  - 日期格式统一使用 `YYYY-MM-DD`
