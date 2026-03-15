@@ -24,6 +24,20 @@ class Settings(BaseSettings):
     ingest_queue_wait_when_full: bool = True
     ingest_queue_batch_size: int = 200
     ingest_queue_batch_wait_ms: int = 80
+    dtu_gateway_enabled: bool = False
+    dtu_gateway_host: str = "0.0.0.0"
+    dtu_gateway_port: int = 9001
+    dtu_gateway_protocol: str = "json_line"
+    dtu_gateway_frame_mode: str = "line"
+    dtu_gateway_frame_delimiter: str = "\\n"
+    dtu_gateway_idle_flush_seconds: float = 0.5
+    dtu_gateway_message_max_bytes: int = 32768
+    dtu_gateway_socket_timeout_seconds: float = 0.5
+    dtu_gateway_backend_ingest_url: str = "http://127.0.0.1:8000/api/v1/ingest/dtu"
+    dtu_gateway_backend_timeout_seconds: float = 5.0
+    dtu_gateway_backend_retry_times: int = 2
+    dtu_gateway_raw_log_enabled: bool = True
+    dtu_gateway_raw_log_dir: str = "logs/dtu-raw"
 
     system_rule_eval_enabled: bool = False
     system_rule_eval_interval_seconds: int = 30

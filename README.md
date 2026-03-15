@@ -17,7 +17,7 @@
 - 数据库：PostgreSQL（默认）
 - 时序增强：TimescaleDB 扩展（默认启用，可关闭）
 - 监控链路：Prometheus + Alertmanager + Grafana（可选本地一键启动）
-- 消息接入：HTTP Ingest（内置）+ MQTT Bridge（可选）
+- 消息接入：HTTP Ingest（内置）+ MQTT Bridge（可选）+ DTU TCP Gateway（可选）
 
 ---
 
@@ -26,7 +26,9 @@
 ```text
 采集设备/FSU
    │
+   ├─ 现场推荐: DTU TCP -> scripts/dtu_ingest_gateway.py -> /api/v1/ingest/dtu
    ├─ HTTP: /api/v1/ingest/telemetry
+   ├─ DTU TCP: scripts/dtu_ingest_gateway.py -> /api/v1/ingest/dtu
    └─ MQTT: fsu/telemetry/# (经 bridge 转发)
           │
           ▼
@@ -226,6 +228,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 ### 7.3 数据采集与查询
 
 - `POST /ingest/telemetry`：标准采集入口。
+- `POST /ingest/dtu`：DTU 适配入口。
 - `POST /ingest/estone`：兼容适配入口。
 - `GET /ingest/queue-status`：采集队列状态。
 - `GET /telemetry/latest`：最新值查询。
@@ -315,7 +318,23 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 - `SYSTEM_RULE_EVAL_INTERVAL_SECONDS`：评估周期。
 - `SYSTEM_RULE_INLINE_ENABLED`：是否在采集链路内联评估。
 
-### 8.5 腾讯云短信（重要告警）
+### 8.5 DTU Gateway
+
+- `DTU_GATEWAY_ENABLED`：是否启用 DTU 网关配置模板。
+- `DTU_GATEWAY_HOST` / `DTU_GATEWAY_PORT`：DTU TCP 监听地址。
+- `DTU_GATEWAY_PROTOCOL`：当前报文解析器，默认 `json_line`。
+- `DTU_GATEWAY_FRAME_MODE`：拆帧模式，支持 `line` 和 `idle`。
+- `DTU_GATEWAY_FRAME_DELIMITER`：`line` 模式分隔符，默认 `\n`。
+- `DTU_GATEWAY_IDLE_FLUSH_SECONDS`：`idle` 模式下的空闲分帧时间。
+- `DTU_GATEWAY_MESSAGE_MAX_BYTES`：单帧最大长度。
+- `DTU_GATEWAY_BACKEND_INGEST_URL`：网关转发地址，默认 `/api/v1/ingest/dtu`。
+- `DTU_GATEWAY_RAW_LOG_ENABLED` / `DTU_GATEWAY_RAW_LOG_DIR`：原始报文落盘开关与目录。
+
+说明：
+- 当前默认提供 `json_line / telemetry_json / estone_json` 三类解析器。
+- 如果后续 DTU 上送的是厂商私有二进制帧，只需要在 `backend/app/services/protocol_adapters.py` 新增解析器，不需要改告警、时序库和前端展示链路。
+
+### 8.6 腾讯云短信（重要告警）
 
 - `SMS_TENCENT_ENABLED`：是否启用腾讯云短信通道（默认 `false`）。
 - `SMS_TENCENT_SECRET_ID`：腾讯云 API 密钥 ID。
@@ -328,7 +347,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
   - `single_text`：单变量模板（推荐，模板只放 `{1}`）。
   - `alarm_v6`：六变量模板（事件/站点/设备/监控项/级别/状态）。
 
-### 8.6 手机号登录与 UniSMS
+### 8.7 手机号登录与 UniSMS
 
 - `SMS_PROVIDER`：短信服务商开关，当前支持：
   - `mock`
@@ -519,7 +538,90 @@ python scripts\test_soak_20min.py --base-url http://127.0.0.1:8000 --duration-mi
 python scripts\mock_curve_ingest.py --base-url http://127.0.0.1:8000 --duration-minutes 20 --interval-seconds 5
 ```
 
-### 11.2 2000 台设备压测
+### 11.2 FSU-2808IM 采集桥
+
+```powershell
+cd C:\Users\Administrator\Desktop\fsu-platform\backend
+
+# 先只看桥接后的标准 payload
+python scripts\fsu_2808im_bridge.py --password "你的设备密码" --dry-run --once
+
+# 再持续上报到平台
+python scripts\fsu_2808im_bridge.py --password "你的设备密码" --backend-ingest-url http://127.0.0.1:8000/api/v1/ingest/telemetry
+```
+
+说明：
+- 脚本会登录 FSU-2808IM 的 Web CGI 接口，自动读取内部设备列表并轮询 `0x0011` 实时信号。
+- 已内置关键测点映射，包括 `room_temp`、`room_humidity`、`mains_voltage`、`mains_current`、`mains_frequency`、`mains_power_state`、`rectifier_output_voltage`、`rectifier_output_current`、`rectifier_fault_status`、`dc_bus_voltage`、`dc_current`、`dc_breaker_status`、`battery_group_voltage`、`battery_group_current`、`battery_temp`、`battery_fault_status`、`battery_fuse_status`、`spd_failure`、`water_leak_status`、`smoke_status`、`door_access_status`、`ac_running_status`、`ac_fault_status`、`ac_comm_status`。
+- 如需同时保留原始测点，可追加 `--include-raw-signals`。
+
+### 11.3 DTU TCP 网关
+
+```powershell
+cd C:\Users\Administrator\Desktop\fsu-platform\backend
+
+# 默认按换行拆帧，适合 DTU 透传 JSON 行协议
+python scripts\dtu_ingest_gateway.py
+
+# 若 DTU 采用空闲分帧，切到 idle 模式
+$env:DTU_GATEWAY_FRAME_MODE='idle'
+python scripts\dtu_ingest_gateway.py
+```
+
+说明：
+- 网关负责监听 DTU TCP 上行端口，并转发到 `POST /api/v1/ingest/dtu`。
+- 当前支持 `line` 和 `idle` 两种拆帧模式，适配大多数 DTU 透传场景。
+- 原始报文会按 `jsonl` 落盘到 `backend/logs/dtu-raw/`，便于后续补私有协议解析器。
+
+推荐接入策略：
+- 当前 `FSU-2808IM` 脚本仅用于协议摸底、点表确认和兼容存量设备。
+- 后续新设备建议统一通过 `DTU TCP -> /api/v1/ingest/dtu` 接入平台，不再按单设备单脚本接入。
+- 平台侧应尽量把 DTU 上报内容收口为统一 JSON 帧，这样新增设备时只需要补 DTU 解析器或点表映射，不需要改告警、时序入库和前端页面。
+
+推荐 DTU 上报样例：
+
+```json
+{
+  "protocol": "json_line",
+  "payload_text": "{\"site_code\":\"SITE-001\",\"site_name\":\"站点A\",\"fsu_code\":\"DTU-001\",\"fsu_name\":\"DTU设备1\",\"collected_at\":\"2026-03-15T20:30:00+08:00\",\"metrics\":[{\"key\":\"room_temp\",\"name\":\"机房温度\",\"value\":26.5,\"unit\":\"C\",\"category\":\"env\"},{\"key\":\"mains_voltage\",\"name\":\"市电电压\",\"value\":220.1,\"unit\":\"V\",\"category\":\"power\"}]}"
+}
+```
+
+如果 DTU 直接透传标准 JSON，也可以让平台收到的 `payload_text` 解出后是下面这种对象：
+
+```json
+{
+  "site_code": "SITE-001",
+  "site_name": "站点A",
+  "fsu_code": "DTU-001",
+  "fsu_name": "DTU设备1",
+  "collected_at": "2026-03-15T20:30:00+08:00",
+  "metrics": [
+    {
+      "key": "room_temp",
+      "name": "机房温度",
+      "value": 26.5,
+      "unit": "C",
+      "category": "env"
+    },
+    {
+      "key": "mains_voltage",
+      "name": "市电电压",
+      "value": 220.1,
+      "unit": "V",
+      "category": "power"
+    }
+  ]
+}
+```
+
+推荐约束：
+- 每帧只上传一个站点/一个 FSU 的一次采样。
+- `collected_at` 使用 ISO 8601 时间。
+- `key` 保持平台统一监控项命名，不把厂商私有点号直接暴露到前端。
+- 厂商私有点号、寄存器地址、二进制协议差异，尽量在 DTU 解析器内消化。
+
+### 11.4 2000 台设备压测
 
 ```powershell
 cd C:\Users\Administrator\Desktop\fsu-platform\backend
@@ -531,7 +633,7 @@ python scripts\load_test_2000.py --base-url http://127.0.0.1:8000 --devices 2000
 python scripts\load_test_2000_realtime.py --base-url http://127.0.0.1:8000 --devices 2000 --rounds 1 --cycle-seconds 15 --concurrency 300 --max-connections 1200 --retries 1
 ```
 
-### 11.3 TimescaleDB 性能对比（2026-03-06 实测）
+### 11.5 TimescaleDB 性能对比（2026-03-06 实测）
 
 脚本：
 - `backend/scripts/benchmark_timescaledb_compare.py`（基础对比）

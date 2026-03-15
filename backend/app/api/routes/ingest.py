@@ -33,7 +33,7 @@ from app.services.metrics import (
     set_ingest_queue_workers,
 )
 from app.services.notifier import dispatch_alarm_notifications
-from app.services.protocol_adapters import normalize_estone_payload
+from app.services.protocol_adapters import normalize_dtu_payload, normalize_estone_payload
 from app.services.access_control import ensure_site_tenant_binding, get_default_sub_tenant
 from app.services.rule_resolver import get_effective_metric_rules_by_key
 from app.services.ws_manager import ws_manager
@@ -1057,6 +1057,70 @@ async def ingest_estone(payload: dict, background_tasks: BackgroundTasks):
     finally:
         observe_ingest_request(
             endpoint="estone",
+            mode=mode,
+            result=result_tag,
+            duration_seconds=time.perf_counter() - started_at,
+            metric_count=metric_count,
+        )
+
+
+@router.post("/dtu")
+async def ingest_dtu(payload: dict, background_tasks: BackgroundTasks):
+    started_at = time.perf_counter()
+    mode = settings.ingest_mode
+    metric_count = 0
+    result_tag = "ok"
+    try:
+        normalized = normalize_dtu_payload(payload)
+    except ValueError as exc:
+        result_tag = "bad_payload"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"DTU \u4e0a\u62a5\u6570\u636e\u683c\u5f0f\u9519\u8bef: {exc}",
+        ) from exc
+
+    metric_count = len(normalized.metrics)
+    try:
+        if mode == "queue":
+            if _ingest_queue is None:
+                result_tag = "queue_unavailable"
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="\u91c7\u96c6\u961f\u5217\u672a\u521d\u59cb\u5316",
+                )
+            if settings.ingest_queue_wait_when_full:
+                await _ingest_queue.put(normalized)
+            else:
+                try:
+                    _ingest_queue.put_nowait(normalized)
+                except asyncio.QueueFull as exc:
+                    result_tag = "queue_full"
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail="\u91c7\u96c6\u961f\u5217\u5df2\u6ee1",
+                    ) from exc
+            queue_size = ingest_queue_size()
+            set_ingest_queue_size(queue_size)
+            return {
+                "ok": True,
+                "accepted": metric_count,
+                "queued": True,
+                "queue_size": queue_size,
+            }
+
+        result, side_effect_payload = await run_in_threadpool(_ingest_telemetry_sync, normalized)
+        background_tasks.add_task(_dispatch_ingest_side_effects, side_effect_payload)
+        return result
+    except HTTPException:
+        if result_tag == "ok":
+            result_tag = "http_error"
+        raise
+    except Exception:
+        result_tag = "error"
+        raise
+    finally:
+        observe_ingest_request(
+            endpoint="dtu",
             mode=mode,
             result=result_tag,
             duration_seconds=time.perf_counter() - started_at,
