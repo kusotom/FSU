@@ -235,6 +235,20 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 - `GET /telemetry/history`：历史曲线查询。
 - `GET /telemetry/history-batch`：批量历史查询（默认支持分钟聚合）。
 
+### 7.3.1 B接口协议2016（平台接入协议）
+
+平台当前按 2016 版 B 接口作为 FSU 接入协议。设备侧把上级 `SC` 地址指向平台后，平台接收 `LOGIN`、`SEND_ALARM` 以及 `GET_DATA_ACK/GET_HISDATA_ACK`，并映射到站点、设备、遥测和告警数据。
+
+- 真实设备入口：`POST /services/SCService`
+- 兼容入口：`POST /services/FSUService`
+- 调试入口：`POST /api/v1/b-interface/2016/invoke`
+- 主动轮询：`POST /api/v1/b-interface/2016/poll`
+- 维谛轮询：`POST /api/v1/b-interface/2016/vertiv/{fsu_code}/poll`
+- 健康检查：`GET /api/v1/b-interface/2016/health`
+- WSDL 占位：`GET /services/SCService?wsdl`
+
+支持裸 XML、gSOAP `xmlData` 请求包以及 `return` 回包。维谛设备登录后会保存 `FsuIP`，需要平台主动采集时，可通过 `/api/v1/b-interface/2016/vertiv/{fsu_code}/poll` 自动向设备 `FSUService` 发 `GET_DATA(Code=401)` 并处理返回的 `GET_DATA_ACK`。详细说明见 `docs/b-interface-2016.md`。
+
 ### 7.4 告警
 
 - `GET /alarms`：告警列表（支持分页与状态筛选，返回 `X-Total-Count`）。
@@ -621,7 +635,61 @@ python scripts\dtu_ingest_gateway.py
 - `key` 保持平台统一监控项命名，不把厂商私有点号直接暴露到前端。
 - 厂商私有点号、寄存器地址、二进制协议差异，尽量在 DTU 解析器内消化。
 
-### 11.4 2000 台设备压测
+### 11.4 铁塔 B 接口抓包接收端
+
+```powershell
+cd C:\Users\Administrator\Desktop\fsu-platform\backend
+
+# 生产抓包建议直接监听 80/21
+python scripts\sc_b_interface_honeypot.py --host 0.0.0.0 --http-port 80 --ftp-port 21
+
+# 本地验证可先用高位端口
+python scripts\sc_b_interface_honeypot.py --host 127.0.0.1 --http-port 18080 --ftp-port 2121
+```
+
+说明：
+- 该脚本用于模拟 `SC` 接收端，抓取 FSU 北向 `B接口` 原始上报。
+- 当前同时提供：
+  - HTTP/XML 接收与最小协议响应
+  - FTP 被动模式上传接收
+  - 可配置的 `GET_FSUINFO / GET_DATA` 主动轮询器
+- 所有原始请求会落盘到 `backend/logs/sc-bait/`：
+  - HTTP 请求头、路径、请求体
+  - FTP 命令流水
+  - FTP 上传文件原文
+  - 轮询请求与响应 XML
+- 适用方式：
+  - 将 FSU 的 `SC服务器地址` 改为本机 IP
+  - 保持设备北向端口按原配置不变
+  - 观察设备先连 HTTP 还是 FTP，再据此整理真实 `B接口` 协议
+  - 如果现场日志确认 `GET_FSUINFO / GET_DATA` 由 `SC` 主动发起，可补 `--poll-target-url` 开启轮询
+
+注意：
+- Windows 下监听 `80/21` 端口通常需要管理员权限。
+- 这个脚本当前已经能按日志格式回 `SEND_ALARM_ACK`，但仍不等于完整铁塔 `B接口 SC` 实现。
+- 如果设备要求更严格的 XML 字段、命令码或鉴权字段，需要根据抓到的真实请求继续补模板。
+
+配套分析脚本：
+- `backend/scripts/decode_pktmon_http.py`
+- 作用：把 `pktmon format` 生成的 `UTF-16` 十六进制文本还原为 HTTP 请求/响应，直接列出 `commandid / resultCode / port / msgBody / response_body`
+- 适用场景：设备 Web 页面或本机 CGI 调试流量已被 `pktmon` 抓到，但不想再手工抠十六进制
+
+示例：
+
+```powershell
+cd C:\Users\Administrator\Desktop\fsu-platform\backend
+python scripts\decode_pktmon_http.py .\logs\pktmon-fsu\fsu-hex.txt
+python scripts\decode_pktmon_http.py .\logs\pktmon-fsu\fsu-hex.txt --json
+```
+
+轮询示例：
+
+```powershell
+cd C:\Users\Administrator\Desktop\fsu-platform\backend
+python scripts\sc_b_interface_honeypot.py --host 0.0.0.0 --http-port 80 --ftp-port 21 --poll-target-url http://192.168.100.100:80/your-b-interface-path --poll-interval-seconds 300
+```
+
+### 11.5 2000 台设备压测
 
 ```powershell
 cd C:\Users\Administrator\Desktop\fsu-platform\backend
@@ -633,7 +701,7 @@ python scripts\load_test_2000.py --base-url http://127.0.0.1:8000 --devices 2000
 python scripts\load_test_2000_realtime.py --base-url http://127.0.0.1:8000 --devices 2000 --rounds 1 --cycle-seconds 15 --concurrency 300 --max-connections 1200 --retries 1
 ```
 
-### 11.5 TimescaleDB 性能对比（2026-03-06 实测）
+### 11.6 TimescaleDB 性能对比（2026-03-06 实测）
 
 脚本：
 - `backend/scripts/benchmark_timescaledb_compare.py`（基础对比）
@@ -1102,3 +1170,314 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 - README 维护约定更新：
   - 以后每次修改 `README.md`，都需要在“最近改动说明”中补充明确日期
   - 日期格式统一使用 `YYYY-MM-DD`
+
+### 15.22 铁塔 B 接口抓包接收端（2026-03-16）
+- 新增 `SC` 仿真接收脚本：
+  - `backend/scripts/sc_b_interface_honeypot.py`
+- 该脚本用于在未知铁塔 `B接口` 细节前，先抓取 FSU 对上级 `SC` 的真实上报：
+  - HTTP/SOAP 请求抓取
+  - FTP 命令抓取
+  - FTP 上传文件留存
+- 当前能力边界：
+  - 支持 HTTP 最小成功响应
+  - 支持 FTP 被动模式上传接收
+  - 适合协议摸底、字段确认、交互顺序确认
+  - 还不等于完整铁塔 `B接口 SC` 正式实现
+- README 已补充该脚本的启动方式、抓包目录和使用注意事项。
+
+### 15.23 铁塔 B 接口最小协议仿真增强（2026-03-16）
+- 根据现场 `XML.log` 已确认的命令集，`SC` 抓包脚本补齐了第一版协议行为：
+  - 收到 `SEND_ALARM` 时返回 `SEND_ALARM_ACK`
+  - 支持把 HTTP/XML 报文按 `PK_Type/Name` 落盘
+  - 新增可配置的主动轮询器，用于向 FSU 发 `GET_FSUINFO / GET_DATA`
+- 当前轮询器支持：
+  - 指定 `--poll-target-url`
+  - 指定轮询周期
+  - 自定义 `GET_FSUINFO / GET_DATA` 请求模板文件
+- 这版能力的目标是先让平台具备“最小 SC”形态，后续再根据真实抓包把命令码、URL 和 XML 结构补齐。
+
+### 15.24 FSU CGI 抓包离线解析与命令补充（2026-03-16）
+- 新增 `backend/scripts/decode_pktmon_http.py`，用于离线解析 `pktmon` 抓到的 `web_main.cgi` HTTP 十六进制文本。
+- 已确认一批 `FSU-2808IM` 私有 CGI 命令：
+  - `0x0001 / resultCode=0 / port=9528`：登录，返回 `用户名`、`sessionid`、`用户级别`
+  - `0x0002 / resultCode=0 / port=9528`：心跳，返回 `0` 或设备类型状态
+  - `0x0003 / resultCode=0 / port=9528`：设备类型/设备列表相关查询
+  - `0x0004 / resultCode=0 / port=9528`：页面初始化类空响应查询
+  - `0x0060 / resultCode=18 / port=9528`：返回 `站点名`、`FSUID`、`FSU型号`
+  - `0x0061 / resultCode=7 / port=9528`：返回本机账号列表与级别
+  - `0x0010 / resultCode=0 / port=9527`：内部设备列表查询
+- 这批结果来自本机对设备 `http://192.168.100.100/cgi-bin/web_main.cgi` 的真实抓包，不是凭空猜测。
+- 当前结论：
+  - 设备私有 CGI 仍可访问
+  - `SCIP` 改到本机后，设备没有主动向本机 `80/8080/21` 发起连接
+  - 后续继续摸铁塔 `B接口`，应优先从设备 CGI 配置和网关侧单播流量两条线并行推进
+
+### 15.25 铁塔北向改判为 `tt_proxy` 原始 TCP 10378（2026-03-16）
+- 通过设备终端确认真实北向代理进程为 `/modem/gprs_monitor/tt_proxy`，而不是 `httpd` 直接向 `SCIP` 发 `HTTP/FTP`。
+- `tt_proxy` 当前工作目录与程序路径：
+  - `/modem/gprs_monitor`
+  - `/modem/gprs_monitor/tt_proxy`
+- 关键配置已确认：
+  - `/modem/gprs_monitor/tt_proxy.ini` 当前上送目标为 `172.17.0.75:10378,172.29.138.129:10378`
+  - `/modem/gprs_monitor/gprs_monitor.ini` 仍保留铁塔域名 `sc.toweraiot.cn / zb-sc.toweraiot.cn`
+  - `/modem/gprs_monitor/vpn_db.ini` 显示四川省分组默认 `SCIP=172.17.0.50`
+- 这说明之前只改 `/home/idu/XmlCfg/init_list.ini` 里的 `SCIP=192.168.100.123` 并不足以把真实北向上送改到本机。
+- 本地 `SC` 抓包脚本已补充原始 TCP 监听能力：
+  - 默认新增 `10378` 端口监听
+  - 原始 TCP 首包落盘到 `backend/logs/sc-bait/tcp/`
+- 后续若要直接抓设备真实北向首包，应优先改 `tt_proxy.ini` 的 `server=` 指向本机 `192.168.100.123:10378`，再重启 `tt_proxy` 或整机。
+
+### 15.26 铁塔北向进一步确认走 L2TP/PPP 隧道（2026-03-17）
+- 新增本地 L2TP 诱捕与配置回写脚本：
+  - `backend/scripts/l2tp_bait.py`
+  - `backend/scripts/fsu_keep_l2tp_local.py`
+  - `backend/scripts/l2tp_bait_capture.ps1`
+- 通过设备 CGI 持续把 LNS 指向本机后，已稳定观察到设备向本机 `UDP/1701` 发起 `L2TP`：
+  - 出现 `SCCRQ -> SCCRP -> SCCCN`
+  - 后续出现 `ICRQ -> ICRP -> ICCN`
+  - 会持续发送 `HELLO`
+- 这说明设备与上级的真实北向承载不是“直接 HTTP/FTP 到 SCIP”，而是先建 `L2TP/PPP` 隧道。
+- 在 `2026-03-17` 的最新抓包中，隧道内已经出现 `PPP/IP(0x0021)` 业务流量，当前可见：
+  - `10.10.10.2 -> 8.8.8.8` 的 `ICMP Echo`
+  - `10.10.10.2 -> 192.168.100.123` 的 `ICMP Echo`
+- `l2tp_bait.py` 现已把 PPP 内层 IPv4 元数据直接写入 JSON，包括：
+  - `src_ip / dst_ip`
+  - `ICMP type/code`
+  - `UDP/TCP 端口`
+- 当前阶段结论：
+  - 先把 `L2TP` 隧道接住，比继续猜 `SC` 应用层报文更接近真实链路
+  - 下一步应继续观察隧道内是否出现到铁塔平台的私有 TCP 会话、明文 XML、或二次封装流量
+
+### 15.27 L2TP 内层 HTTP 回放原型（2026-03-17）
+- `backend/scripts/l2tp_bait.py` 新增可选 HTTP 回放模式：
+  - 启动参数：`--http-replay-base-url http://127.0.0.1:8000`
+- 当前能力：
+  - 从 `PPP/IP/TCP` 中识别发往 `80/8080/8000` 的明文 HTTP
+  - 以 TCP 流为单位拼接请求头和请求体
+  - 自动把请求回放到指定目标，例如本地 `SC` 调试服务
+  - 回放结果落盘到 `backend/logs/l2tp-bait/http-replay/`
+- 适用场景：
+  - 想验证“设备虽然先走 L2TP，但应用层是否本质仍是 HTTP/XML”
+  - 想把隧道内明文 HTTP 请求快速导入本地接口做联调
+- 能力边界：
+  - 这不是完整 PPP 出口网关，也不是完整 NAT
+  - 当前只做“单向提取并回放 HTTP 请求”，不会把 HTTP 响应重新封回 L2TP 发给设备
+  - 如果隧道内上层协议不是明文 HTTP，或启用了私有封装/加密，这个模式不会生效
+
+### 15.28 固件包确认铁塔主北向为 `tt_proxy -> UDP/10378`（2026-03-17）
+- 从升级包 `Update/eStoneII` 提取出的关键配置和组件：
+  - `modem/gprs_monitor/tt_proxy.ini`
+  - `modem/gprs_monitor/gprs_monitor.default.ini`
+  - `modem/gprs_monitor/tt_proxy`
+  - `modem/gprs_monitor/ttb.so`
+- 现已确认：
+  - `tt_proxy.ini` 的正式目标为 `172.29.138.117:10378,172.29.138.129:10378`
+  - `gprs_monitor.default.ini` 的 `monitor_type = 2`，即 `usb modem + l2tp`
+  - `l2tp_lns = 180.153.49.166`
+  - `start_gprs` 会先启动 `tt_proxy`，再启动 `gprs_monitor`
+- `tt_proxy` 二进制字符串显示主北向传输不是原始 HTTP，而是私有 `UDP`：
+  - `bind udp %d success.`
+  - `send_realtime_data`
+  - `recved heartbeat rsp.`
+  - `set heartbeat interval to %d seconds.`
+  - `QZ^&`
+  - `%d|%s`
+  - `200|`
+  - `deviceId=%s\`ID=%s\`bGet=true\`status=%d\`value=%s;`
+- `ttb.so` 二进制字符串显示业务层来自本地 SOAP：
+  - `http://127.0.0.1:8080/services/FSUService`
+  - `SendReqData`
+  - `<Name>GET_DATA</Name>`
+  - `<Code>401</Code>`
+  - `<FsuId>%s</FsuId>`
+  - `<FsuCode>%s</FsuCode>`
+- 当前最合理的主链路模型：
+  - 设备先建 `L2TP/PPP`
+  - `tt_proxy` 通过 `ttb.so` 从本机 `FSUService` 拉取 `GET_DATA(Code=401)` 等业务数据
+  - `tt_proxy` 再把业务点位转成 `deviceId=...` 文本片段
+  - 最后封装成私有 `UDP/10378` 报文上送铁塔侧
+- 配套离线工具：
+  - `backend/scripts/decode_ttproxy_udp10378.py`
+  - `backend/scripts/ttproxy_udp_bait.py`
+  - `backend/scripts/analyze_ttproxy_udp10378.py`
+  - 当前按 `QZ^& + <code>|<body>` 解析，已能识别 `200|` 实时数据与 `online/offline/unknown` 状态词
+- 当前阶段结论：
+  - 先前在 `L2TP` 内抓到的 `UDP/7000` 更像辅链路/状态协议，不是铁塔主北向最终格式
+  - 要拿到主协议实锤，下一步应把设备 `tt_proxy.ini` 的 `server=` 改到本机并抓一份真实 `10378/UDP` 首包
+- 本机诱捕命令：
+  - `cd backend`
+  - `python scripts/ttproxy_udp_bait.py --host 0.0.0.0 --port 10378 --decode`
+  - 抓包会落到 `backend/logs/ttproxy-udp/`，每个包同时生成 `.bin / .json / .decoded.json`
+- 抓到真实包后的离线汇总：
+  - `python scripts/analyze_ttproxy_udp10378.py .\\logs\\ttproxy-udp`
+  - 可快速查看远端来源、消息码分布、类型分布和最近报文样本
+- 现场改配置建议：
+  - 把设备 `tt_proxy.ini` 的 `server=` 临时改为 `192.168.100.123:10378`
+  - 保留原铁塔地址作为第二个备份项，避免回切困难
+  - 重启 `tt_proxy` 后优先观察本机是否收到首个 `QZ^&...` 或 `200|...` 报文
+
+### 15.29 设备联机改配与串口阻塞记录（2026-03-20）
+- 通过离线 `pktmon` HTTP 解析，已从真实 Web 会话中恢复出一个仍可用的 `operator` 会话：
+  - `sessionid = 69b87796_2953ad92`
+- 基于该会话，已对设备 `http://192.168.100.100/cgi-bin/web_main.cgi` 完成真实写操作：
+  - `0x0050 / resultCode=1`：成功把主 `L2TP/VPN` 改到本机 `192.168.100.123`
+  - `0x0050 / resultCode=23`：成功把集团灾备 `VPN` 改到本机 `192.168.100.123`
+- 现场验证过一个重要入口：
+  - `0x0050 / resultCode=27` 会真实触发后台预置的 `vpnUpdate.sh ...` 模板
+  - 例如执行 `vpnUpdate.sh SiChuan 1 YM` 后，主 VPN 配置会被切回 `sc-r.toweraiot.cn / sc.toweraiot.cn`
+- 当前对 `resultCode=27` 的边界判断：
+  - 能执行后台白名单 VPN 模板
+  - 但暂未证实可执行任意自定义 shell
+  - 直接传 `/bin/sh ...`、`/bin/echo ...`、在合法模板后拼接 `; sed ...`，都没有观察到可验证的自定义副作用
+- 当前恢复后的主 VPN 读回结果为：
+  - `192.168.100.123`
+  - `192.168.100.123`
+  - `10.0.0.0/8`
+  - `ttcw2015 / ttcw@2015`
+  - `192.168.100.123`
+  - `192.168.100.123`
+  - `192.168.100.1/8`
+  - 最后一个备份位仍为 `sc.toweraiot.cn`
+- `admin` 密码已确认收到：
+  - `Admin@123`
+  - 但当前直接登录返回 `-11`，说明不是密码错，而是“登录会话已满”
+- 当前 `COM3` 串口在 Windows 侧的状态：
+  - `mode COM3` 可见，参数为 `115200 8N1`
+  - 但 `SerialPort.Open()` 仍返回 `A device attached to the system is not functioning.`
+  - 因此本轮尚未进入设备 shell，`/modem/gprs_monitor/tt_proxy.ini` 还没有被直接改写
+- 当前阶段结论：
+  - Web 侧已经能稳定把 `L2TP/VPN` 拉到本机
+  - `10378/UDP` 诱捕器已就位，可继续等待真实北向首包
+  - 要直接修改 `tt_proxy.ini`，仍需拿到以下任一条件：
+    - 可用串口 shell
+    - 可用 `admin` 会话
+    - 或新的高权限文件/脚本入口
+
+### 15.30 B 接口 2016 作为平台接入协议（2026-04-20）
+- 明确平台当前 FSU 接入协议采用铁塔 B 接口 2016：
+  - 真实设备入口：`/services/SCService`
+  - 兼容入口：`/services/FSUService`
+  - 调试入口：`/api/v1/b-interface/2016/invoke`
+- 已移除 2024 版直连接口入口：
+  - 不再注册 `/api/v1/openapi/*`
+  - 删除对应路由和 Schema
+  - 设备台账表仅作为 2016 接入后的 FSU 注册信息存储
+- `B 接口 2016` 解析增强：
+  - 支持裸 XML
+  - 支持 gSOAP `invoke/xmlData`
+  - 支持 SOAP `return` 回包解析，便于处理 FSU 主动查询响应
+- 新增主动轮询接口：
+  - `POST /api/v1/b-interface/2016/poll`
+  - `POST /api/v1/b-interface/2016/vertiv/{fsu_code}/poll`
+  - 默认可向 FSU 发 `GET_DATA(Code=401)`
+  - 若返回 `GET_DATA_ACK/GET_HISDATA_ACK`，平台会立即解析 `TSemaphore` 并写入遥测
+- 按维谛/Vertiv eStoneII 接入方式升级：
+  - `LOGIN_ACK` 返回 `RightLevel=2`
+  - 登录时保存 `FsuIP / FSUVendor / FSUManufactor / Version / DeviceList`
+  - 维谛专用轮询接口会使用登录保存的 `FsuIP` 自动请求 `http://<FsuIP>:8080/services/FSUService`
+  - 遥测解析兼容 `TSemaphore / Semaphore / Signal / TSignal`
+  - 遥测值兼容 `MeasuredVal / SetupVal / Status / Value / Val`
+- `docs/b-interface-2016.md` 已改为现场接入说明，包含：
+  - FSU 侧 `SC` 地址配置
+  - 平台入口列表
+  - 支持报文
+  - 数据映射规则
+  - 主动 `GET_DATA` 调试示例
+
+### 15.31 维谛 `tt_proxy -> UDP/10378` 现场联调记录（2026-04-21）
+- 设备现场配置已确认收敛到本机：
+  - `/modem/gprs_monitor/tt_proxy.ini` 当前为 `server=192.168.100.123:10378,192.168.100.123:10378,`
+  - `/modem/gprs_monitor/gprs_monitor.ini` 当前主 `server_ip / l2tp_lns / disaster_recovery_*` 均指向 `192.168.100.123`
+- 当前设备北向现状已明确分成两层：
+  - `SiteUnit/XML` 侧 `m_SCLoginIP=192.168.100.123:8004`
+  - `tt_proxy` 侧已真实向本机 `UDP/10378` 发包，远端源端口为 `10379`
+- `gprs_monitor.log` 当前关键结论：
+  - 设备运行模式为 `monitor_type=6`
+  - 启动日志显示 `will monitor l2tp over eth0 or usb modem (prefer eth0)`
+  - 仍持续出现 `detect usb device pid-0x0000 vid-0x0000`、`modem start failed`，说明 USB modem 识别仍异常
+- 本轮已补齐现场分析工具：
+  - `backend/scripts/decode_ttproxy_udp10378.py`
+    - 新增对 `15` 字节私有头 + `GB18030` 字段记录格式的识别
+    - 可直接解析 `register-status` 包，并提取 `site_code / site_name / DataSCIP / register status`
+  - `backend/scripts/analyze_ttproxy_udp10378.py`
+    - 新增 `register_statuses`、`data_scip_values` 汇总
+  - `backend/scripts/ttproxy_udp_responder.py`
+    - 新增 `UDP/10378` 监听 + 可控回包实验能力
+- 已抓到的真实 `10378` 首包已不再只是“未知包”，而是可解析的注册状态包：
+  - 文本体固定从偏移 `15` 开始
+  - 典型字段包括：
+    - `19|51050243802162`
+    - `22|192.168.100.123:8004`
+    - `26|离线`
+  - 这说明设备确实已把北向状态上送到本机，但尚未进入实时数据阶段
+- 现场触发与回包试验结果：
+  - 不回包时，`SiteUnit` 重启后会稳定收到一组 `register-status`：
+    - 先上送 `26|siteunit未运行`
+    - 随后变为 `26|离线`
+    - 未出现 `QZ^&200|deviceId=...` 实时数据包
+  - 试过对每个状态帧回 `同头 + 文本 "60"`：
+    - 设备仍只回 `register-status`
+    - 状态未被推进到 `online`
+    - 也未触发 `QZ^&200` 实时数据流
+  - 追加试过两种更接近心跳字符串的回包：
+    - 纯文本 `60|good`
+    - `同头 + 文本 "60|good"`
+    - 两种方式都未推动状态离开 `离线`，也未触发 `QZ^&200`
+  - 追加验证过 `8004/SCService` 监听窗口：
+    - 本机在 `0.0.0.0:8004` 启动 HTTP 诱捕器后，再次重启 `SiteUnit`
+    - 监听目录无任何 `HTTP` 请求落盘
+    - 说明当前设备并不会在这一路径上主动向本机 `SCService` 发 B 接口登录
+- 当前最准确的阶段判断：
+  - “设备没有把包发到平台”这个问题已经排除
+  - 现在卡在 `tt_proxy` 注册/心跳阶段，设备状态仍为 `0-no_service / 离线`
+  - 当前猜测的心跳回包格式不足以推动设备进入实时数据阶段
+- 相关现场目录：
+  - 首次整机重启后抓到的历史状态包：`backend/logs/full-reboot-20260421-190011/ttproxy-udp`
+  - 不回包复现实验：`C:\Users\测试\device-analysis\reply-test-20260421-3`
+  - 回 `header-text 60` 的试验：`C:\Users\测试\device-analysis\reply-test-20260421-4`
+  - 回 `text 60|good` 的试验：`C:\Users\测试\device-analysis\reply-test-20260421-5`
+  - 回 `header-text 60|good` 的试验：`C:\Users\测试\device-analysis\reply-test-20260421-6`
+  - `8004` 监听空窗口：`C:\Users\测试\device-analysis\sc8004-test-20260421`
+- 后续建议：
+  - 继续逆向 `tt_proxy` 真正的心跳/注册响应格式，目标是把状态从 `离线` 推进到 `online`
+  - 当前已初步排除“先主动打 `HTTP/8004` 再转实时数据”的路径，下一轮应把重点放回 `10378` 注册响应协议本身
+
+### 15.32 eStoneII 固件刷入与 DS/SC 登录链路确认（2026-04-26）
+- 使用完整升级包改造后，现场刷入结果已确认生效：
+  - `/home/idu/XmlCfg/init_list.ini` 已被读取，`m_SCLoginIP=192.168.100.123`
+  - `MonitorUnitsStationName=1.xml` 已被 `SiteUnit` 读取
+  - 采集配置从 `0` 个采集端口恢复为 `3` 个采集端口
+  - `2801BM.so` 与 `FSUIO.so` 均加载成功
+  - `SiteUnit` 主模块初始化成功
+- 本轮关键固件配置：
+  - `tt_proxy.ini` 指向 `192.168.100.123:10378`
+  - `gprs_monitor.ini / gprs_monitor.bak.ini / gprs_monitor.default.ini` 的 `monitor_type=0`
+  - `SiteUnit_TT.ini` 设置 `NoModemTest=1`，现场日志显示“测试模式, 不获取猫IP”
+  - `DscIp=udp://192.168.100.123:9000`
+  - `RDSIp=udp://192.168.100.123:7000`
+  - `Model SO_Path=/data2/web/WebProvider.so`
+- 刷入后设备已发出标准 `LOGIN(Code=101)` XML：
+  - `FsuId=51051243812345`
+  - `FsuCode=51051243812345`
+  - `FsuIP=192.168.100.100`
+  - `MacId=00:09:F5:FD:85:85`
+  - `Version=21.1.HQ.FSU.WD.AA44.R`
+  - `DeviceList` 包含烟感、温湿度、水浸、电池与 FSU 本体设备
+- 本机抓包已确认设备真实打到平台侧 DS 端口：
+  - `192.168.100.100:6000 -> 192.168.100.123:9000`
+  - 抓到的首包长度为 `245` 字节
+  - 包体不是 XML 明文，而是 DS 私有 UDP 传输层握手
+  - 包内可见 `udp://192.168.100.100:6000` 与 `ftp://root:hello@192.168.100.100`
+- 已做过最小回包试验：
+  - 对 `UDP/9000` 握手包不回包时，设备等待后继续登录失败
+  - 对握手包做原包回显时，设备仍每约 `3` 秒重复发送相同握手包
+  - 因此简单回显不是有效 DS 应答格式
+- 当前阶段结论：
+  - 固件配置、XML 配置、SO 路径、测试直连模式已经打通
+  - “设备没有向平台发包”的问题已经排除
+  - 当前阻塞点已经上移到 `UDP/9000` 的 DS 私有传输层确认格式
+  - 下一步应实现 DS/SC 模拟服务器，先完成 `UDP/9000` 握手确认，再返回 `LOGIN_ACK`
+- 现场验证命令：
+  - 查看设备业务日志：`http://192.168.100.100/fsu_log/XML.log`
+  - 抓 `tt_proxy` 状态包：`python backend/scripts/ttproxy_udp_responder.py --host 0.0.0.0 --port 10378`
+  - 抓 DS 登录握手：`python C:\Users\测试\device-analysis\mock_sc_server.py --port 9000 --reply-mode none --verbose`
