@@ -1471,7 +1471,13 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 - 已做过最小回包试验：
   - 对 `UDP/9000` 握手包不回包时，设备等待后继续登录失败
   - 对握手包做原包回显时，设备仍每约 `3` 秒重复发送相同握手包
-  - 因此简单回显不是有效 DS 应答格式
+  - 对握手包只回传 `22` 字节传输层头时，设备仍成对重复发送 `209/245` 字节握手包
+  - 因此简单回显和传输层头回显都不是有效 DS 应答格式
+- 新增 DS 登录握手抓包与回包实验脚本：
+  - `backend/scripts/ds_udp9000_responder.py`
+  - 可解析 `6d7e...` 私有 UDP 握手包
+  - 可提取包内 `udp://192.168.100.100:600x` 与 `ftp://root:hello@192.168.100.100`
+  - 支持 `none / echo / prefix / text / custom-hex` 回包模式
 - 当前阶段结论：
   - 固件配置、XML 配置、SO 路径、测试直连模式已经打通
   - “设备没有向平台发包”的问题已经排除
@@ -1480,4 +1486,5 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 - 现场验证命令：
   - 查看设备业务日志：`http://192.168.100.100/fsu_log/XML.log`
   - 抓 `tt_proxy` 状态包：`python backend/scripts/ttproxy_udp_responder.py --host 0.0.0.0 --port 10378`
-  - 抓 DS 登录握手：`python C:\Users\测试\device-analysis\mock_sc_server.py --port 9000 --reply-mode none --verbose`
+  - 抓 DS 登录握手：`python backend/scripts/ds_udp9000_responder.py --port 9000 --reply-mode none --verbose`
+  - 试验 DS 回包：`python backend/scripts/ds_udp9000_responder.py --port 9000 --reply-mode custom-hex --reply-hex "<hex>"`
