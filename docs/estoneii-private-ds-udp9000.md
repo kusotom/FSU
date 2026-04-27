@@ -274,3 +274,30 @@ python backend\scripts\estoneii_sc_lab.py --duration 300 --udp-ports 9000,7000 -
 ```
 
 这个模式已经能让设备进入 `Register OK`，并在监听期间持续响应 DS/RDS 心跳。监听停止后设备会在下一轮心跳超时后重新 `LogToDS`，这是预期行为。
+
+## 落地接入守护进程
+
+`estoneii_sc_lab.py` 仍用于实验和抓包。正式接入入口使用：
+
+```powershell
+python backend\scripts\estoneii_ds_gateway.py --ds-url udp://192.168.100.123:9000 --udp-ports 9000,7000
+```
+
+默认行为：
+
+- 长期监听 `UDP/9000,7000`。
+- 复用 `estoneii-ds-ack`，处理 GetServiceAddr、DS/RDS 心跳、`SendAllCommState`。
+- 将事件追加写入 `backend/logs/estoneii-ds-gateway/events.jsonl`。
+- 使用 `--capture-packets` 可同时保存每个包的 `.bin/.json` 明细，便于继续逆向业务帧。
+- 使用 `--duration-seconds 600` 可做限时验收；默认 `0` 为常驻运行。
+
+事件流当前至少包含：
+
+```text
+ds_get_service_addr
+ds_heartbeat
+ds_short_ack
+send_all_comm_state
+```
+
+下一步落地点是把该 JSONL 事件流或守护进程内的事件处理器接入平台数据库，并继续解析实时数据、历史数据、告警、控制等业务帧。

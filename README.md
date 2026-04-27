@@ -1497,6 +1497,13 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 已实测 `2026-04-27 14:52:03`：增加短 ACK 后设备日志从 `SendAllCommState Failed!` 变为 `SendAllCommState Success!`
   - 新增 `backend/scripts/analyze_estoneii_captures.py`，用于按端口、命令、`header[6]`、长度和回包大小汇总 lab 捕获
   - 说明该固件的 B 接口 XML/业务数据仍可能封装在 DS/RDS 私有 UDP 通道里，而不是裸 HTTP POST
+- 新增可长期运行的 eStoneII DS 接入守护进程：
+  - `backend/scripts/estoneii_ds_gateway.py`
+  - 默认监听 `UDP/9000,7000`，复用已验证的 `estoneii-ds-ack` 回包逻辑
+  - 默认写入 `backend/logs/estoneii-ds-gateway/events.jsonl`
+  - `--duration-seconds 0` 为常驻运行，设置为正数可做限时验收
+  - 事件类型包括 `ds_get_service_addr`、`ds_heartbeat`、`ds_short_ack`、`send_all_comm_state`
+  - 该脚本是后续接平台入库的稳定入口，lab 脚本保留用于抓包和实验
 - 当前阶段结论：
   - 固件配置、XML 配置、SO 路径、测试直连模式已经打通
   - “设备没有向平台发包”的问题已经排除
@@ -1508,3 +1515,4 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 抓 DS 登录握手：`python backend/scripts/ds_udp9000_responder.py --port 9000 --reply-mode none --verbose`
   - 联合试验 DS/SC：`python backend/scripts/estoneii_sc_lab.py --duration 300 --udp-ports 9000,7000 --http-ports 80,8000 --reply-mode estoneii-ds-ack --ds-table-status-byte 0 --ds-url udp://192.168.100.123:9000 --ds-service-types 0,5,6,7,8,9`
   - 分析实验捕获：`python backend/scripts/analyze_estoneii_captures.py backend/logs/estoneii-sc-lab-ack2-20260427-144804 --large-min-size 31`
+  - 长期运行接入守护进程：`python backend/scripts/estoneii_ds_gateway.py --ds-url udp://192.168.100.123:9000 --udp-ports 9000,7000`
