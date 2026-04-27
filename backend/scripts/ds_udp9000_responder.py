@@ -24,6 +24,7 @@ SERVICE_TYPE_LABELS = {
 COMMAND_LABELS = {
     0x0011: "log_to_ds_or_get_service_addr",
     0x001F: "short_ds_keepalive_or_ack",
+    0x8010: "ds_business_state_or_report",
     0x8011: "rds_heartbeat",
     0x801F: "short_ds_keepalive_or_ack_response",
 }
@@ -368,8 +369,21 @@ def build_estoneii_ds_ack(payload: bytes, args: argparse.Namespace) -> bytes | N
                 command_id=command_id,
                 args=with_overrides(args, reply_header6=0xD3),
             )
+        if command_id == 0x8010 and payload[6] == 0x2B:
+            return build_short_command_ack(payload)
 
     return None
+
+
+def build_short_command_ack(payload: bytes) -> bytes | None:
+    if len(payload) < HEADER_LEN or payload[:2] != b"m~":
+        return None
+    reply = bytearray(payload[:HEADER_LEN])
+    reply[4:6] = (0x001F).to_bytes(2, "little")
+    reply[20:22] = (0).to_bytes(2, "little")
+    reply[22:24] = b"\x00\x00"
+    reply[22:24] = checksum16(bytes(reply)).to_bytes(2, "little")
+    return bytes(reply)
 
 
 def with_overrides(args: argparse.Namespace, **overrides: Any) -> argparse.Namespace:

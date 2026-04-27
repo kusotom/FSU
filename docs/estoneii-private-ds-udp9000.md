@@ -244,6 +244,29 @@ header[6]=0xd3
 body=<request_body[1:5]>   # 4 字节 Unix 时间戳，小端
 ```
 
+### 全量通信状态上报 ACK
+
+注册成功后约 3 分钟，设备会触发 `SendAllCommState`。抓包显示该阶段发出 51 字节私有帧：
+
+```text
+cmd=0x8010
+header[6]=0x2b
+body_length=27
+```
+
+如果平台不回包，设备每约 10 秒重发一次，30 秒后日志出现 `SendAllCommState Failed!`。
+
+反汇编 `SiteUnit` 后确认，这类高位命令帧需要短 ACK。有效 ACK 为复制请求头并改写：
+
+```text
+cmd=0x001f
+header[6]=0x2b
+body_length=0
+checksum=重新计算
+```
+
+实测 `2026-04-27 14:52:03`，平台对 `0x8010/0x2b` 连续 3 个包回 `24` 字节短 ACK 后，设备日志变为 `SendAllCommState Success!`。
+
 脚本入口：
 
 ```powershell
