@@ -9,7 +9,9 @@ param(
   [string]$OutputDir = "backend\logs\estoneii-ds-gateway",
   [int]$DurationSeconds = 0,
   [double]$StatusIntervalSeconds = 5,
+  [int]$UnknownCaptureMinSize = 31,
   [switch]$CapturePackets,
+  [switch]$NoCaptureUnknownPackets,
   [switch]$ForwardShortAcks
 )
 
@@ -34,6 +36,7 @@ $gatewayArgs = @(
   "--udp-ports", $UdpPorts,
   "--duration-seconds", "$DurationSeconds",
   "--status-interval-seconds", "$StatusIntervalSeconds",
+  "--unknown-capture-min-size", "$UnknownCaptureMinSize",
   "--output-dir", $OutputDir,
   "--ds-url", "udp://${PlatformIp}:9000",
   "--site-code", $SiteCode,
@@ -47,6 +50,9 @@ if ($BackendIngestUrl) {
 }
 if ($CapturePackets) {
   $gatewayArgs += "--capture-packets"
+}
+if ($NoCaptureUnknownPackets) {
+  $gatewayArgs += "--no-capture-unknown-packets"
 }
 if ($ForwardShortAcks) {
   $gatewayArgs += "--forward-short-acks"

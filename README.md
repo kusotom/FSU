@@ -1503,12 +1503,14 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 默认写入 `backend/logs/estoneii-ds-gateway/events.jsonl`
   - 默认写入 `backend/logs/estoneii-ds-gateway/status.json`，记录运行状态、包计数、事件计数、最后一帧和后端投递统计
   - `status.json` 周期刷新 `updated_at` 与 `stale_after_seconds`，用于进程守护判断
+  - 默认自动保存未知/疑似业务帧到 `unknown-udp-*`，即使没有开启全量 `--capture-packets`
   - 可选 `--backend-ingest-url http://127.0.0.1:8000/api/v1/ingest/telemetry`，将 DS 注册、心跳、通信状态事件转成平台遥测点入库
   - 后端投递使用后台线程池，不阻塞 UDP 收包和 ACK；后端不可用时设备侧协议仍继续响应
   - 默认站点/FSU 编码使用当前联调设备 `51051243812345`，落地部署时可用 `--site-code/--site-name/--fsu-code/--fsu-name` 覆盖
   - Windows 现场启动脚本：`scripts/start-estoneii-ds-gateway.ps1`
   - `--duration-seconds 0` 为常驻运行，设置为正数可做限时验收
   - 事件类型包括 `ds_get_service_addr`、`ds_heartbeat`、`ds_short_ack`、`send_all_comm_state`
+  - 未识别私有帧会标记为 `unknown_business_frame` 或 `unknown_ds_frame`，用于继续逆向实时数据、历史数据和告警帧
   - 该脚本是后续接平台入库的稳定入口，lab 脚本保留用于抓包和实验
 - 当前阶段结论：
   - 固件配置、XML 配置、SO 路径、测试直连模式已经打通

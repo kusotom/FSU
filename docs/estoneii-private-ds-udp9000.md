@@ -332,9 +332,13 @@ estoneii.ds.checksum_valid
 estoneii.ds.get_service_addr
 estoneii.ds.heartbeat
 estoneii.ds.send_all_comm_state
+estoneii.ds.unknown_business_frame
+estoneii.ds.unknown_ds_frame
 ```
 
 `ds_short_ack` 默认只记录 JSONL，不入库；需要排查短包频率时可加 `--forward-short-acks`。
+
+默认情况下，即使未开启全量 `--capture-packets`，网关也会把未知/疑似业务帧保存到 `unknown-udp-*` 目录。当前阈值为 `31` 字节，可用 `--unknown-capture-min-size` 调整，或用 `--no-capture-unknown-packets` 关闭。
 
 网关默认还会写 `status.json`，用于现场巡检和进程守护判断：
 

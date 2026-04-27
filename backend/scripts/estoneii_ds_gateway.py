@@ -61,6 +61,8 @@ class GatewayConfig:
     status_file_name: str
     status_interval_seconds: float
     capture_packets: bool
+    capture_unknown_packets: bool
+    unknown_capture_min_size: int
     duration_seconds: int
     buffer_size: int
     ds_url: str
@@ -134,6 +136,14 @@ def classify_packet(payload: bytes, decoded: dict[str, Any], local_port: int, re
                     "tail": body[26],
                 }
             )
+    elif payload.startswith(b"m~") and command_id is not None:
+        event_type = "unknown_business_frame" if len(payload) >= 31 else "unknown_ds_frame"
+        parsed.update(
+            {
+                "body_hex_sample": body[:96].hex(),
+                "body_size": len(body),
+            }
+        )
 
     return {
         "event_type": event_type,
@@ -204,6 +214,10 @@ def event_to_telemetry_payload(event: dict[str, Any], config: GatewayConfig) -> 
         metrics.append(_metric("estoneii.ds.send_all_comm_state", "eStoneII DS send all comm state", 1))
     elif event_type == "ds_short_ack":
         metrics.append(_metric("estoneii.ds.short_ack", "eStoneII DS short ack packet", 1))
+    elif event_type == "unknown_business_frame":
+        metrics.append(_metric("estoneii.ds.unknown_business_frame", "eStoneII DS unknown business frame", 1))
+    elif event_type == "unknown_ds_frame":
+        metrics.append(_metric("estoneii.ds.unknown_ds_frame", "eStoneII DS unknown frame", 1))
     else:
         return None
 
@@ -275,6 +289,17 @@ def bind_udp_sockets(host: str, ports: list[int]) -> list[socket.socket]:
         sock.setblocking(False)
         sockets.append(sock)
     return sockets
+
+
+def should_save_packet_capture(event: dict[str, Any], config: GatewayConfig) -> bool:
+    if config.capture_packets:
+        return True
+    if not config.capture_unknown_packets:
+        return False
+    return (
+        event.get("event_type") in {"unknown_business_frame", "unknown_ds_frame", "unknown"}
+        and int(event.get("payload_size") or 0) >= config.unknown_capture_min_size
+    )
 
 
 def run_gateway(config: GatewayConfig) -> int:
@@ -376,8 +401,9 @@ def run_gateway(config: GatewayConfig) -> int:
                 event_counts[event["event_type"]] = event_counts.get(event["event_type"], 0) + 1
                 maybe_update_status(True, event)
 
-                if config.capture_packets:
-                    output_dir = config.output_dir / f"udp-{local[1]}"
+                if should_save_packet_capture(event, config):
+                    prefix = "udp" if config.capture_packets else "unknown-udp"
+                    output_dir = config.output_dir / f"{prefix}-{local[1]}"
                     stem = f"{utc_now_text()}_{remote[0].replace(':', '-')}_{remote[1]}"
                     save_capture(output_dir, stem, payload, decoded, remote, local, reply)
 
@@ -428,6 +454,17 @@ def parse_args() -> argparse.Namespace:
         default=float(os.getenv("ESTONEII_DS_STATUS_INTERVAL_SECONDS", "5")),
     )
     parser.add_argument("--capture-packets", action="store_true")
+    parser.add_argument(
+        "--capture-unknown-packets",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("ESTONEII_DS_CAPTURE_UNKNOWN_PACKETS", True),
+        help="Always save unknown DS/business frames even when --capture-packets is not enabled.",
+    )
+    parser.add_argument(
+        "--unknown-capture-min-size",
+        type=int,
+        default=int(os.getenv("ESTONEII_DS_UNKNOWN_CAPTURE_MIN_SIZE", "31")),
+    )
     parser.add_argument(
         "--duration-seconds",
         type=int,
@@ -487,6 +524,8 @@ def main() -> int:
         status_file_name=args.status_file_name,
         status_interval_seconds=args.status_interval_seconds,
         capture_packets=args.capture_packets,
+        capture_unknown_packets=args.capture_unknown_packets,
+        unknown_capture_min_size=args.unknown_capture_min_size,
         duration_seconds=args.duration_seconds,
         buffer_size=args.buffer_size,
         ds_url=args.ds_url,
