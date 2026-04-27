@@ -300,4 +300,32 @@ ds_short_ack
 send_all_comm_state
 ```
 
+## 平台入库
+
+`estoneii_ds_gateway.py` 已支持把私有 DS 事件旁路转发到平台标准遥测入口。UDP ACK 仍在主线程内立即返回；HTTP 入库在后台线程池执行，后端短暂不可用不会阻塞设备注册、心跳和 `SendAllCommState` ACK。
+
+```powershell
+python backend\scripts\estoneii_ds_gateway.py `
+  --ds-url udp://192.168.100.123:9000 `
+  --udp-ports 9000,7000 `
+  --backend-ingest-url http://127.0.0.1:8000/api/v1/ingest/telemetry `
+  --site-code 51051243812345 `
+  --site-name 凤凰广场 `
+  --fsu-code 51051243812345 `
+  --fsu-name eStoneII-FSU
+```
+
+当前会入库的通信类遥测点：
+
+```text
+estoneii.ds.packet
+estoneii.ds.reply_size
+estoneii.ds.checksum_valid
+estoneii.ds.get_service_addr
+estoneii.ds.heartbeat
+estoneii.ds.send_all_comm_state
+```
+
+`ds_short_ack` 默认只记录 JSONL，不入库；需要排查短包频率时可加 `--forward-short-acks`。
+
 下一步落地点是把该 JSONL 事件流或守护进程内的事件处理器接入平台数据库，并继续解析实时数据、历史数据、告警、控制等业务帧。
