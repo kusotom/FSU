@@ -297,9 +297,19 @@ def should_save_packet_capture(event: dict[str, Any], config: GatewayConfig) -> 
     if not config.capture_unknown_packets:
         return False
     return (
-        event.get("event_type") in {"unknown_business_frame", "unknown_ds_frame", "unknown"}
+        event.get("event_type") in {"send_all_comm_state", "unknown_business_frame", "unknown_ds_frame", "unknown"}
         and int(event.get("payload_size") or 0) >= config.unknown_capture_min_size
     )
+
+
+def packet_capture_subdir(event: dict[str, Any], local_port: int, config: GatewayConfig) -> Path:
+    if config.capture_packets:
+        prefix = "udp"
+    elif event.get("event_type") == "send_all_comm_state":
+        prefix = "business-udp"
+    else:
+        prefix = "unknown-udp"
+    return config.output_dir / f"{prefix}-{local_port}"
 
 
 def run_gateway(config: GatewayConfig) -> int:
@@ -402,8 +412,7 @@ def run_gateway(config: GatewayConfig) -> int:
                 maybe_update_status(True, event)
 
                 if should_save_packet_capture(event, config):
-                    prefix = "udp" if config.capture_packets else "unknown-udp"
-                    output_dir = config.output_dir / f"{prefix}-{local[1]}"
+                    output_dir = packet_capture_subdir(event, local[1], config)
                     stem = f"{utc_now_text()}_{remote[0].replace(':', '-')}_{remote[1]}"
                     save_capture(output_dir, stem, payload, decoded, remote, local, reply)
 

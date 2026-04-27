@@ -1496,6 +1496,7 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - `SendAllCommState` 阶段会发 `cmd=0x8010/header[6]=0x2b` 的 51 字节帧；平台需要回 `cmd=0x001f/header[6]=0x2b`、空 body 的 24 字节短 ACK
   - 已实测 `2026-04-27 14:52:03`：增加短 ACK 后设备日志从 `SendAllCommState Failed!` 变为 `SendAllCommState Success!`
   - 新增 `backend/scripts/analyze_estoneii_captures.py`，用于按端口、命令、`header[6]`、长度和回包大小汇总 lab 捕获
+  - 新增 `backend/scripts/analyze_estoneii_gateway_events.py`，用于汇总网关目录内的 `events.jsonl/status.json/unknown-udp-*`
   - 说明该固件的 B 接口 XML/业务数据仍可能封装在 DS/RDS 私有 UDP 通道里，而不是裸 HTTP POST
 - 新增可长期运行的 eStoneII DS 接入守护进程：
   - `backend/scripts/estoneii_ds_gateway.py`
@@ -1503,7 +1504,7 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 默认写入 `backend/logs/estoneii-ds-gateway/events.jsonl`
   - 默认写入 `backend/logs/estoneii-ds-gateway/status.json`，记录运行状态、包计数、事件计数、最后一帧和后端投递统计
   - `status.json` 周期刷新 `updated_at` 与 `stale_after_seconds`，用于进程守护判断
-  - 默认自动保存未知/疑似业务帧到 `unknown-udp-*`，即使没有开启全量 `--capture-packets`
+  - 默认自动保存 `SendAllCommState` 到 `business-udp-*`，保存未知/疑似业务帧到 `unknown-udp-*`，即使没有开启全量 `--capture-packets`
   - 可选 `--backend-ingest-url http://127.0.0.1:8000/api/v1/ingest/telemetry`，将 DS 注册、心跳、通信状态事件转成平台遥测点入库
   - 后端投递使用后台线程池，不阻塞 UDP 收包和 ACK；后端不可用时设备侧协议仍继续响应
   - 默认站点/FSU 编码使用当前联调设备 `51051243812345`，落地部署时可用 `--site-code/--site-name/--fsu-code/--fsu-name` 覆盖
@@ -1523,6 +1524,7 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 抓 DS 登录握手：`python backend/scripts/ds_udp9000_responder.py --port 9000 --reply-mode none --verbose`
   - 联合试验 DS/SC：`python backend/scripts/estoneii_sc_lab.py --duration 300 --udp-ports 9000,7000 --http-ports 80,8000 --reply-mode estoneii-ds-ack --ds-table-status-byte 0 --ds-url udp://192.168.100.123:9000 --ds-service-types 0,5,6,7,8,9`
   - 分析实验捕获：`python backend/scripts/analyze_estoneii_captures.py backend/logs/estoneii-sc-lab-ack2-20260427-144804 --large-min-size 31`
+  - 分析网关事件和未知业务帧：`python backend/scripts/analyze_estoneii_gateway_events.py backend/logs/estoneii-ds-gateway --large-min-size 31 --show-hex`
   - 长期运行接入守护进程：`python backend/scripts/estoneii_ds_gateway.py --ds-url udp://192.168.100.123:9000 --udp-ports 9000,7000`
   - 长期运行并入库：`python backend/scripts/estoneii_ds_gateway.py --ds-url udp://192.168.100.123:9000 --udp-ports 9000,7000 --backend-ingest-url http://127.0.0.1:8000/api/v1/ingest/telemetry --site-code 51051243812345 --site-name 凤凰广场 --fsu-code 51051243812345 --fsu-name eStoneII-FSU`
   - Windows 脚本启动：`powershell -ExecutionPolicy Bypass -File scripts/start-estoneii-ds-gateway.ps1 -BackendIngestUrl http://127.0.0.1:8000/api/v1/ingest/telemetry -SiteName 凤凰广场`
