@@ -315,6 +315,14 @@ python backend\scripts\estoneii_ds_gateway.py `
   --fsu-name eStoneII-FSU
 ```
 
+Windows 现场也可以直接使用封装脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start-estoneii-ds-gateway.ps1 `
+  -BackendIngestUrl http://127.0.0.1:8000/api/v1/ingest/telemetry `
+  -SiteName 凤凰广场
+```
+
 当前会入库的通信类遥测点：
 
 ```text
@@ -327,5 +335,25 @@ estoneii.ds.send_all_comm_state
 ```
 
 `ds_short_ack` 默认只记录 JSONL，不入库；需要排查短包频率时可加 `--forward-short-acks`。
+
+网关默认还会写 `status.json`，用于现场巡检和进程守护判断：
+
+```json
+{
+  "running": true,
+  "updated_at": "2026-04-27T10:28:51.550748+00:00",
+  "stale_after_seconds": 15.0,
+  "packet_count": 0,
+  "event_counts": {},
+  "backend": {
+    "queued": 0,
+    "success": 0,
+    "failed": 0
+  },
+  "last_event": null
+}
+```
+
+守护进程巡检时不要只看 `running`，还要确认当前时间减 `updated_at` 小于 `stale_after_seconds`。如果外层会话强杀进程，最终 `running=false` 可能来不及写入，但 `updated_at` 会停止刷新。
 
 下一步落地点是把该 JSONL 事件流或守护进程内的事件处理器接入平台数据库，并继续解析实时数据、历史数据、告警、控制等业务帧。

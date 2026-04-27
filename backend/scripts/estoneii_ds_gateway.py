@@ -26,6 +26,7 @@ BACKEND_ROOT = CURRENT_DIR.parent
 REPO_ROOT = CURRENT_DIR.parents[1]
 STOP_EVENT = threading.Event()
 LOG_LOCK = threading.Lock()
+STATUS_LOCK = threading.Lock()
 
 
 def utc_now() -> datetime:
@@ -57,6 +58,8 @@ class GatewayConfig:
     udp_ports: list[int]
     output_dir: Path
     event_log_name: str
+    status_file_name: str
+    status_interval_seconds: float
     capture_packets: bool
     duration_seconds: int
     buffer_size: int
@@ -157,6 +160,17 @@ def append_event(output_dir: Path, event_log_name: str, event: dict[str, Any]) -
         with target.open("a", encoding="utf-8") as fp:
             fp.write(json.dumps(event, ensure_ascii=False))
             fp.write("\n")
+
+
+def write_status(output_dir: Path, status_file_name: str, status: dict[str, Any]) -> None:
+    if not status_file_name:
+        return
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target = output_dir / status_file_name
+    temp = target.with_suffix(f"{target.suffix}.tmp")
+    with STATUS_LOCK:
+        temp.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp.replace(target)
 
 
 def _metric(key: str, name: str, value: float, *, unit: str | None = None) -> dict[str, Any]:
@@ -267,6 +281,42 @@ def run_gateway(config: GatewayConfig) -> int:
     logger = logging.getLogger("estoneii-ds-gateway")
     reply_args = ReplyArgs(config)
     sockets = bind_udp_sockets(config.host, config.udp_ports)
+    started_at = utc_now().isoformat()
+    backend_stats = {"queued": 0, "success": 0, "failed": 0}
+    backend_stats_lock = threading.Lock()
+
+    def on_backend_done(future) -> None:
+        try:
+            ok = bool(future.result())
+        except Exception:
+            ok = False
+        with backend_stats_lock:
+            backend_stats["success" if ok else "failed"] += 1
+
+    def backend_stats_snapshot() -> dict[str, int]:
+        with backend_stats_lock:
+            return dict(backend_stats)
+
+    def update_status(running: bool, last_event: dict[str, Any] | None = None) -> None:
+        write_status(
+            config.output_dir,
+            config.status_file_name,
+            {
+                "running": running,
+                "started_at": started_at,
+                "updated_at": utc_now().isoformat(),
+                "status_interval_seconds": config.status_interval_seconds,
+                "stale_after_seconds": max(config.status_interval_seconds * 3, 15.0),
+                "listen": {"host": config.host, "udp_ports": config.udp_ports},
+                "ds_url": config.ds_url,
+                "backend_ingest_enabled": bool(config.backend_ingest_url),
+                "packet_count": packet_count,
+                "event_counts": event_counts,
+                "backend": backend_stats_snapshot(),
+                "last_event": last_event,
+            },
+        )
+
     backend_pool = (
         ThreadPoolExecutor(max_workers=max(config.backend_worker_count, 1))
         if config.backend_ingest_url
@@ -274,6 +324,15 @@ def run_gateway(config: GatewayConfig) -> int:
     )
     packet_count = 0
     event_counts: dict[str, int] = {}
+    latest_event: dict[str, Any] | None = None
+    last_status_at = 0.0
+
+    def maybe_update_status(running: bool, last_event: dict[str, Any] | None = None, *, force: bool = False) -> None:
+        nonlocal last_status_at
+        now = time.monotonic()
+        if force or now - last_status_at >= max(config.status_interval_seconds, 0.1):
+            update_status(running, last_event)
+            last_status_at = now
 
     logger.info(
         "gateway starting: listen=%s ports=%s ds_url=%s output=%s capture_packets=%s",
@@ -283,6 +342,7 @@ def run_gateway(config: GatewayConfig) -> int:
         config.output_dir,
         config.capture_packets,
     )
+    maybe_update_status(True, force=True)
 
     try:
         deadline = time.monotonic() + config.duration_seconds if config.duration_seconds > 0 else None
@@ -290,6 +350,8 @@ def run_gateway(config: GatewayConfig) -> int:
             if deadline is not None and time.monotonic() >= deadline:
                 break
             readable, _, _ = select.select(sockets, [], [], 1.0)
+            if not readable:
+                maybe_update_status(True, latest_event)
             for sock in readable:
                 payload, remote = sock.recvfrom(config.buffer_size)
                 local = sock.getsockname()
@@ -302,12 +364,17 @@ def run_gateway(config: GatewayConfig) -> int:
                 event = classify_packet(payload, decoded, local[1], reply)
                 event["remote_ip"] = remote[0]
                 event["remote_port"] = remote[1]
+                latest_event = event
                 append_event(config.output_dir, config.event_log_name, event)
                 forward_queued = False
                 if backend_pool is not None and event_to_telemetry_payload(event, config) is not None:
-                    backend_pool.submit(forward_event_to_backend, event, config, logger)
+                    future = backend_pool.submit(forward_event_to_backend, event, config, logger)
+                    future.add_done_callback(on_backend_done)
+                    with backend_stats_lock:
+                        backend_stats["queued"] += 1
                     forward_queued = True
                 event_counts[event["event_type"]] = event_counts.get(event["event_type"], 0) + 1
+                maybe_update_status(True, event)
 
                 if config.capture_packets:
                     output_dir = config.output_dir / f"udp-{local[1]}"
@@ -332,6 +399,7 @@ def run_gateway(config: GatewayConfig) -> int:
             sock.close()
         if backend_pool is not None:
             backend_pool.shutdown(wait=False)
+        update_status(False, latest_event)
         logger.info("gateway stopped: packets=%s events=%s", packet_count, event_counts)
     return 0
 
@@ -353,6 +421,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--udp-ports", default=os.getenv("ESTONEII_DS_UDP_PORTS", "9000,7000"))
     parser.add_argument("--output-dir", default=os.getenv("ESTONEII_DS_OUTPUT_DIR", "logs/estoneii-ds-gateway"))
     parser.add_argument("--event-log-name", default=os.getenv("ESTONEII_DS_EVENT_LOG_NAME", "events.jsonl"))
+    parser.add_argument("--status-file-name", default=os.getenv("ESTONEII_DS_STATUS_FILE_NAME", "status.json"))
+    parser.add_argument(
+        "--status-interval-seconds",
+        type=float,
+        default=float(os.getenv("ESTONEII_DS_STATUS_INTERVAL_SECONDS", "5")),
+    )
     parser.add_argument("--capture-packets", action="store_true")
     parser.add_argument(
         "--duration-seconds",
@@ -410,6 +484,8 @@ def main() -> int:
         udp_ports=parse_int_list(args.udp_ports),
         output_dir=resolve_path(args.output_dir),
         event_log_name=args.event_log_name,
+        status_file_name=args.status_file_name,
+        status_interval_seconds=args.status_interval_seconds,
         capture_packets=args.capture_packets,
         duration_seconds=args.duration_seconds,
         buffer_size=args.buffer_size,
