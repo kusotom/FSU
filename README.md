@@ -79,6 +79,7 @@ fsu-platform/
 - `README.md`：项目总览、部署方式、模块能力说明。
 - `CHANGELOG.md`：持续记录重要功能变更与收口情况。
 - `docs/unisms-sms-task-record.md`：UniSMS 接入执行记录与剩余工作。
+- `docs/estoneii-private-ds-udp9000.md`：eStoneII `SiteUnit` 在 SOAP B 接口前的 DS UDP/9000 私有握手解析。
 - `backend/app/integrations/unisms/README.md`：UniSMS 供应商适配层说明。
 - `backend/.env.unisms.example`：UniSMS 实发模式环境变量模板。
 
@@ -1477,14 +1478,22 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - `backend/scripts/ds_udp9000_responder.py`
   - 可解析 `6d7e...` 私有 UDP 握手包
   - 可提取包内 `udp://192.168.100.100:600x` 与 `ftp://root:hello@192.168.100.100`
-  - 支持 `none / echo / prefix / text / custom-hex` 回包模式
+  - 支持 `none / echo / prefix / text / custom-hex / ds-address-table-ack` 等回包模式
+  - `ds-address-table-ack` 已按反汇编修正为 `status_byte + u16le(table_len) + type/len/url...`
+  - `status_byte=0` 对应 `LogToDS return ... Success`，`1` 为 Fail，`2` 为 UnRegister
+  - 地址表成功掩码疑似要求 type `0,5,6,7,8,9` 全部出现，对应诊断、信号、发布、事件、实时、历史通道
+- 新增联合实验脚本：
+  - `backend/scripts/estoneii_sc_lab.py`
+  - 同时监听 `UDP/9000` 和 HTTP `SCService`
+  - 当前能稳定收到 `cmd=17` 私有 DS 握手并返回合法校验应答
+  - 尚未收到设备 HTTP `LOGIN`，需要继续验证 DS 地址表后的通道状态/端口字段
 - 当前阶段结论：
   - 固件配置、XML 配置、SO 路径、测试直连模式已经打通
   - “设备没有向平台发包”的问题已经排除
-  - 当前阻塞点已经上移到 `UDP/9000` 的 DS 私有传输层确认格式
-  - 下一步应实现 DS/SC 模拟服务器，先完成 `UDP/9000` 握手确认，再返回 `LOGIN_ACK`
+  - `UDP/9000` 帧头、校验和、请求 body 和 DS 地址表应答结构已基本解析
+  - 当前阻塞点是 `GetServiceAddr/LoginToDSC` 成功后的 DS 通道确认，HTTP `LOGIN_ACK` 模拟器已准备好但还没被设备打到
 - 现场验证命令：
   - 查看设备业务日志：`http://192.168.100.100/fsu_log/XML.log`
   - 抓 `tt_proxy` 状态包：`python backend/scripts/ttproxy_udp_responder.py --host 0.0.0.0 --port 10378`
   - 抓 DS 登录握手：`python backend/scripts/ds_udp9000_responder.py --port 9000 --reply-mode none --verbose`
-  - 试验 DS 回包：`python backend/scripts/ds_udp9000_responder.py --port 9000 --reply-mode custom-hex --reply-hex "<hex>"`
+  - 联合试验 DS/SC：`python backend/scripts/estoneii_sc_lab.py --duration 90 --http-ports 80,8000 --reply-mode ds-address-table-ack --ds-table-status-byte 0 --ds-url udp://192.168.100.123:9000 --ds-service-types 0,5,6,7,8,9`

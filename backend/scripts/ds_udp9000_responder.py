@@ -12,6 +12,18 @@ from typing import Any
 
 ASCII_RE = re.compile(rb"[ -~]{4,}")
 URL_RE = re.compile(rb"(?:udp|ftp)://[ -~]+")
+HEADER_LEN = 24
+CHECKSUM_OFFSET = 22
+CHECKSUM_END = 24
+SERVICE_TYPE_LABELS = {
+    0x00: "primary_udp",
+    0x01: "secondary_udp",
+    0x14: "ftp",
+    0xFF: "fallback_udp",
+}
+COMMAND_LABELS = {
+    0x0011: "log_to_ds_or_get_service_addr",
+}
 
 
 def utc_now() -> datetime:
@@ -82,20 +94,91 @@ def split_null_strings(payload: bytes, offset: int = 22) -> list[dict[str, Any]]
     return parts
 
 
+def checksum16(payload: bytes) -> int:
+    if len(payload) < HEADER_LEN:
+        return 0
+    return sum(payload[2:CHECKSUM_OFFSET] + payload[HEADER_LEN:]) & 0xFFFF
+
+
+def parse_service_block(body: bytes) -> dict[str, Any] | None:
+    if len(body) < 105:
+        return None
+
+    timestamp = int.from_bytes(body[97:101], "little")
+    result: dict[str, Any] = {
+        "token_a": body[0:32].decode("ascii", errors="replace"),
+        "token_separator_hex": body[32:33].hex(),
+        "token_b": body[33:65].decode("ascii", errors="replace"),
+        "token_b_padding": body[65:97].decode("ascii", errors="replace"),
+        "timestamp_unix": timestamp,
+        "timestamp_utc": datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
+        if timestamp
+        else "",
+        "address_count": body[101],
+        "address_reserved_hex": body[102:104].hex(),
+        "addresses": [],
+    }
+
+    cursor = 102
+    for index in range(result["address_count"]):
+        if cursor >= len(body):
+            break
+        if index == 0 and cursor + 3 <= len(body):
+            service_type = body[cursor]
+            reserved = body[cursor + 1]
+            value_len = body[cursor + 2]
+            cursor += 3
+        elif cursor + 2 <= len(body):
+            service_type = body[cursor]
+            reserved = None
+            value_len = body[cursor + 1]
+            cursor += 2
+        else:
+            break
+
+        value = body[cursor : cursor + value_len]
+        cursor += value_len
+        result["addresses"].append(
+            {
+                "index": index,
+                "service_type": service_type,
+                "service_type_hex": f"{service_type:02x}",
+                "service_type_guess": SERVICE_TYPE_LABELS.get(service_type, "unknown"),
+                "reserved": reserved,
+                "length": value_len,
+                "value": value.decode("ascii", errors="replace"),
+            }
+        )
+
+    result["remaining_hex"] = body[cursor:].hex()
+    return result
+
+
 def decode_payload(payload: bytes) -> dict[str, Any]:
+    body = payload[HEADER_LEN:] if len(payload) >= HEADER_LEN else b""
     result: dict[str, Any] = {
         "payload_length": len(payload),
         "payload_hex": payload.hex(),
         "magic_hex": payload[:2].hex() if len(payload) >= 2 else payload.hex(),
         "looks_like_ds_udp9000": len(payload) >= 2 and payload[:2] == b"m~",
+        "body_length_actual": len(body),
         "ascii_spans": ascii_spans(payload),
         "urls": extract_urls(payload),
     }
 
-    if len(payload) >= 22:
+    if len(payload) >= HEADER_LEN:
+        body_length_field = int.from_bytes(payload[20:22], "little")
+        checksum_field = int.from_bytes(payload[22:24], "little")
+        computed_checksum = checksum16(payload)
+        command_id = int.from_bytes(payload[4:6], "little")
         result["header"] = {
-            "raw_hex": payload[:22].hex(),
-            "byte_2": payload[2],
+            "raw_hex": payload[:HEADER_LEN].hex(),
+            "sequence": payload[2],
+            "reserved_3": payload[3],
+            "command_id": command_id,
+            "command_id_hex": payload[4:6].hex(),
+            "command_guess": COMMAND_LABELS.get(command_id, "unknown"),
+            "fixed_6_19_hex": payload[6:20].hex(),
             "word_3_4_be": int.from_bytes(payload[3:5], "big"),
             "word_3_4_le": int.from_bytes(payload[3:5], "little"),
             "word_5_6_be": int.from_bytes(payload[5:7], "big"),
@@ -104,12 +187,27 @@ def decode_payload(payload: bytes) -> dict[str, Any]:
             "word_12_13_le": int.from_bytes(payload[12:14], "little"),
             "word_20_21_be": int.from_bytes(payload[20:22], "big"),
             "word_20_21_le": int.from_bytes(payload[20:22], "little"),
+            "body_length": body_length_field,
+            "checksum": checksum_field,
+            "checksum_computed": computed_checksum,
+            "checksum_valid": checksum_field == computed_checksum,
         }
-        result["null_strings_after_header"] = split_null_strings(payload, 22)
+        result["body"] = parse_service_block(body)
+        result["null_strings_after_header"] = split_null_strings(payload, HEADER_LEN)
 
     url_values = [item["url"] for item in result["urls"]]
+    if len(payload) >= HEADER_LEN and payload[:2] == b"m~":
+        if payload.find(b"[dhcp]") >= 0:
+            packet_variant = "dhcp-address-report"
+        elif any("192.168." in value for value in url_values):
+            packet_variant = "resolved-address-report"
+        else:
+            packet_variant = "address-report"
+    else:
+        packet_variant = "unknown"
     result["summary"] = {
         "type_guess": "ds_udp9000_handshake" if result["looks_like_ds_udp9000"] else "unknown",
+        "packet_variant": packet_variant,
         "device_udp_urls": [value for value in url_values if value.startswith("udp://")],
         "device_ftp_urls": [value for value in url_values if value.startswith("ftp://")],
     }
@@ -129,7 +227,153 @@ def build_reply(payload: bytes, args: argparse.Namespace) -> bytes | None:
         if not args.reply_hex:
             raise ValueError("--reply-hex is required for custom-hex mode")
         return bytes.fromhex(args.reply_hex.replace(" ", ""))
+    if args.reply_mode in {"empty-ack", "empty-ack-next-command"}:
+        return build_empty_ack(payload, increment_command=args.reply_mode == "empty-ack-next-command")
+    if args.reply_mode == "status-byte-ack":
+        return build_framed_reply(payload, bytes([args.reply_status & 0xFF]), args=args)
+    if args.reply_mode == "status-u32-ack":
+        return build_framed_reply(
+            payload,
+            int(args.reply_status).to_bytes(4, "little", signed=False),
+            args=args,
+        )
+    if args.reply_mode == "service-list-ack":
+        return build_framed_reply(payload, build_service_list_body(args.reply_status, args.sc_url), args=args)
+    if args.reply_mode == "ds-address-table-ack":
+        return build_framed_reply(
+            payload,
+            build_ds_address_table_body(
+                args.ds_url,
+                args.ds_service_types,
+                status_byte=args.ds_table_status_byte,
+                length_endian=args.ds_table_length_endian,
+                include_count=args.ds_table_include_count,
+            ),
+            args=args,
+        )
     raise ValueError(f"unsupported reply mode: {args.reply_mode}")
+
+
+def build_empty_ack(payload: bytes, *, increment_command: bool) -> bytes:
+    if len(payload) < HEADER_LEN or payload[:2] != b"m~":
+        return b"m~\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+
+    reply = bytearray(payload[:HEADER_LEN])
+    command_id = int.from_bytes(reply[4:6], "little")
+    if increment_command:
+        reply[4:6] = ((command_id + 1) & 0xFFFF).to_bytes(2, "little")
+    reply[20:22] = (0).to_bytes(2, "little")
+    reply[22:24] = (0).to_bytes(2, "little")
+    reply[22:24] = checksum16(bytes(reply)).to_bytes(2, "little")
+    return bytes(reply)
+
+
+def resolve_reply_command_id(
+    request_command_id: int,
+    command_id: int | None,
+    command_mode: str,
+) -> int:
+    if command_id is not None:
+        return command_id & 0xFFFF
+    if command_mode == "same":
+        return request_command_id & 0xFFFF
+    if command_mode == "increment":
+        return (request_command_id + 1) & 0xFFFF
+    if command_mode == "zero":
+        return 0
+    raise ValueError(f"unsupported reply command mode: {command_mode}")
+
+
+def apply_reply_header_options(header: bytearray, args: argparse.Namespace | None) -> None:
+    if args is None:
+        return
+    if getattr(args, "reply_seq_delta", 0):
+        header[2] = (header[2] + args.reply_seq_delta) & 0xFF
+    if getattr(args, "reply_header3", None) is not None:
+        header[3] = args.reply_header3 & 0xFF
+
+
+def build_framed_reply(
+    payload: bytes,
+    body: bytes,
+    *,
+    command_id: int | None = None,
+    args: argparse.Namespace | None = None,
+) -> bytes:
+    if len(payload) < HEADER_LEN or payload[:2] != b"m~":
+        header = bytearray(HEADER_LEN)
+        header[:2] = b"m~"
+        resolved_command_id = resolve_reply_command_id(
+            0x0011,
+            command_id,
+            getattr(args, "reply_command_mode", "same"),
+        )
+        header[4:6] = resolved_command_id.to_bytes(2, "little")
+    else:
+        header = bytearray(payload[:HEADER_LEN])
+        request_command_id = int.from_bytes(header[4:6], "little")
+        resolved_command_id = resolve_reply_command_id(
+            request_command_id,
+            command_id,
+            getattr(args, "reply_command_mode", "same"),
+        )
+        header[4:6] = resolved_command_id.to_bytes(2, "little")
+
+    apply_reply_header_options(header, args)
+    header[20:22] = len(body).to_bytes(2, "little")
+    header[22:24] = b"\x00\x00"
+    reply = bytes(header) + body
+    reply = bytearray(reply)
+    reply[22:24] = checksum16(bytes(reply)).to_bytes(2, "little")
+    return bytes(reply)
+
+
+def build_service_list_body(status: int, sc_url: str) -> bytes:
+    encoded_url = sc_url.encode("ascii")
+    if len(encoded_url) > 255:
+        raise ValueError("--sc-url is too long for one-byte length encoding")
+    # Experimental DS response shape: status + one service endpoint.
+    # The exact device ACK body is still being validated against captures.
+    return (
+        int(status).to_bytes(4, "little", signed=False)
+        + b"\x01"
+        + b"\x00"
+        + bytes([len(encoded_url)])
+        + encoded_url
+    )
+
+
+def build_ds_address_table_body(
+    ds_url: str,
+    service_types_text: str,
+    *,
+    status_byte: int = 0,
+    length_endian: str = "little",
+    include_count: bool = False,
+) -> bytes:
+    encoded_url = ds_url.encode("ascii")
+    if len(encoded_url) > 255:
+        raise ValueError("--ds-url is too long for one-byte length encoding")
+    service_types = [
+        int(item.strip(), 0) & 0xFF
+        for item in service_types_text.split(",")
+        if item.strip()
+    ]
+    entries = bytearray()
+    for service_type in service_types:
+        entries.append(service_type)
+        entries.append(len(encoded_url))
+        entries.extend(encoded_url)
+    if len(entries) > 0xFFFF:
+        raise ValueError("DS address table body is too large")
+    prefix = bytearray([status_byte & 0xFF])
+    if length_endian != "none":
+        prefix.extend(len(entries).to_bytes(2, length_endian))
+    if include_count:
+        if len(service_types) > 255:
+            raise ValueError("too many DS service types for one-byte count")
+        prefix.append(len(service_types))
+    return bytes(prefix) + bytes(entries)
 
 
 def save_capture(
@@ -190,6 +434,10 @@ def run_server(args: argparse.Namespace) -> int:
         safe_print(
             f"[{count}] {remote[0]}:{remote[1]} -> {local[0]}:{local[1]} "
             f"{len(payload)} bytes type={summary.get('type_guess')} "
+            f"variant={summary.get('packet_variant')} "
+            f"seq={decoded.get('header', {}).get('sequence')} "
+            f"cmd={decoded.get('header', {}).get('command_id')} "
+            f"checksum={decoded.get('header', {}).get('checksum_valid')} "
             f"udp_urls={len(summary.get('device_udp_urls', []))} "
             f"ftp_urls={len(summary.get('device_ftp_urls', []))} "
             f"reply={0 if reply is None else len(reply)}"
@@ -198,6 +446,18 @@ def run_server(args: argparse.Namespace) -> int:
         if args.verbose:
             for span in decoded.get("ascii_spans", []):
                 safe_print(f"  ascii[{span['start']}:{span['end']}] {span['text']}")
+            service_body = decoded.get("body") or {}
+            if service_body.get("timestamp_utc"):
+                safe_print(
+                    f"  token_a={service_body.get('token_a')} "
+                    f"token_b={service_body.get('token_b')} "
+                    f"time={service_body.get('timestamp_utc')}"
+                )
+            for address in service_body.get("addresses", []):
+                safe_print(
+                    f"  addr[{address['index']}] type={address['service_type_guess']} "
+                    f"len={address['length']} value={address['value']}"
+                )
 
         if args.limit > 0 and count >= args.limit:
             break
@@ -224,13 +484,76 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--reply-mode",
-        choices=("none", "echo", "prefix", "text", "custom-hex"),
+        choices=(
+            "none",
+            "echo",
+            "prefix",
+            "text",
+            "custom-hex",
+            "empty-ack",
+            "empty-ack-next-command",
+            "status-byte-ack",
+            "status-u32-ack",
+            "service-list-ack",
+            "ds-address-table-ack",
+        ),
         default="none",
         help="Experimental reply mode",
     )
     parser.add_argument("--reply-prefix-size", type=int, default=22)
     parser.add_argument("--reply-text", default="OK")
     parser.add_argument("--reply-hex", default="")
+    parser.add_argument("--reply-status", type=int, default=1, help="Status value for status ACK experiments")
+    parser.add_argument(
+        "--reply-command-mode",
+        choices=("same", "increment", "zero"),
+        default="same",
+        help="How to set the framed reply command id when --reply-mode builds a DS frame",
+    )
+    parser.add_argument(
+        "--reply-seq-delta",
+        type=int,
+        default=0,
+        help="Add this signed delta to the request sequence byte in framed replies",
+    )
+    parser.add_argument(
+        "--reply-header3",
+        type=lambda value: int(value, 0),
+        default=None,
+        help="Override framed reply header byte at offset 3, e.g. 0x01",
+    )
+    parser.add_argument(
+        "--sc-url",
+        default="http://192.168.100.123:8000/services/SCService",
+        help="SC service URL used by service-list-ack experiments",
+    )
+    parser.add_argument(
+        "--ds-url",
+        default="udp://192.168.100.123:9000",
+        help="DS UDP service URL used by ds-address-table-ack experiments",
+    )
+    parser.add_argument(
+        "--ds-service-types",
+        default="0,5,6,7,8,9",
+        help="Comma-separated DS service type bytes for ds-address-table-ack",
+    )
+    parser.add_argument(
+        "--ds-table-status-byte",
+        type=lambda value: int(value, 0),
+        default=0,
+        help="Leading status byte for ds-address-table-ack before the address table",
+    )
+    parser.add_argument(
+        "--ds-table-length-endian",
+        choices=("little", "big", "none"),
+        default="little",
+        help="Endian for the two-byte address-table length prefix, or none to omit it",
+    )
+    parser.add_argument(
+        "--ds-table-include-count",
+        action="store_true",
+        help="Append a one-byte service count before address-table entries",
+    )
     return parser.parse_args()
 
 
