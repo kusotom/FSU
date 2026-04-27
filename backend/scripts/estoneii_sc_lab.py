@@ -54,11 +54,13 @@ def run_udp_responders(args: argparse.Namespace, output_root: Path) -> int:
         reply_command_mode=args.reply_command_mode,
         reply_seq_delta=args.reply_seq_delta,
         reply_header3=args.reply_header3,
+        reply_header6=args.reply_header6,
         sc_url=args.sc_url,
         ds_url=args.ds_url,
         ds_service_types=args.ds_service_types,
         ds_table_status_byte=args.ds_table_status_byte,
         ds_table_length_endian=args.ds_table_length_endian,
+        ds_table_size_field=args.ds_table_size_field,
         ds_table_include_count=args.ds_table_include_count,
     )
     ports = parse_int_list(args.udp_ports or str(args.udp_port))
@@ -132,6 +134,10 @@ def parse_args() -> argparse.Namespace:
             "service-list-ack",
             "ds-address-table-ack",
             "ds-session-ack",
+            "ds-registration-only-ack",
+            "estoneii-ds-ack",
+            "ds-toggle-ack",
+            "ds-toggle-copy-ack",
         ),
         default="empty-ack",
     )
@@ -139,14 +145,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reply-text", default="OK")
     parser.add_argument("--reply-hex", default="")
     parser.add_argument("--reply-status", type=int, default=1)
-    parser.add_argument("--reply-command-mode", choices=("same", "increment", "zero"), default="same")
+    parser.add_argument("--reply-command-mode", choices=("same", "increment", "zero", "xor-high-bit"), default="same")
     parser.add_argument("--reply-seq-delta", type=int, default=0)
     parser.add_argument("--reply-header3", type=lambda value: int(value, 0), default=None)
+    parser.add_argument("--reply-header6", type=lambda value: int(value, 0), default=None)
     parser.add_argument("--sc-url", default="http://192.168.100.123:80/services/SCService")
     parser.add_argument("--ds-url", default="udp://192.168.100.123:9000")
     parser.add_argument("--ds-service-types", default="0,5,6,7,8,9")
     parser.add_argument("--ds-table-status-byte", type=lambda value: int(value, 0), default=0)
     parser.add_argument("--ds-table-length-endian", choices=("little", "big", "none"), default="little")
+    parser.add_argument("--ds-table-size-field", choices=("entry-count", "byte-length", "none"), default="entry-count")
     parser.add_argument("--ds-table-include-count", action="store_true")
     return parser.parse_args()
 

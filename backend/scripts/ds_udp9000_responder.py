@@ -23,6 +23,9 @@ SERVICE_TYPE_LABELS = {
 }
 COMMAND_LABELS = {
     0x0011: "log_to_ds_or_get_service_addr",
+    0x001F: "short_ds_keepalive_or_ack",
+    0x8011: "rds_heartbeat",
+    0x801F: "short_ds_keepalive_or_ack_response",
 }
 
 
@@ -100,6 +103,12 @@ def checksum16(payload: bytes) -> int:
     return sum(payload[2:CHECKSUM_OFFSET] + payload[HEADER_LEN:]) & 0xFFFF
 
 
+def checksum16_excluding_peer_word(payload: bytes) -> int:
+    if len(payload) < HEADER_LEN:
+        return 0
+    return sum(payload[2:16] + payload[20:CHECKSUM_OFFSET] + payload[HEADER_LEN:]) & 0xFFFF
+
+
 def parse_service_block(body: bytes) -> dict[str, Any] | None:
     if len(body) < 105:
         return None
@@ -154,6 +163,19 @@ def parse_service_block(body: bytes) -> dict[str, Any] | None:
     return result
 
 
+def decode_short_body(command_id: int, body: bytes) -> dict[str, Any] | None:
+    if command_id != 0x8011 or len(body) != 6:
+        return None
+    timestamp = int.from_bytes(body[1:5], "little")
+    return {
+        "kind": "rds_heartbeat",
+        "status_or_flag": body[0],
+        "timestamp_unix": timestamp,
+        "timestamp_local_hint": datetime.fromtimestamp(timestamp).isoformat() if timestamp else "",
+        "tail": body[5],
+    }
+
+
 def decode_payload(payload: bytes) -> dict[str, Any]:
     body = payload[HEADER_LEN:] if len(payload) >= HEADER_LEN else b""
     result: dict[str, Any] = {
@@ -170,6 +192,7 @@ def decode_payload(payload: bytes) -> dict[str, Any]:
         body_length_field = int.from_bytes(payload[20:22], "little")
         checksum_field = int.from_bytes(payload[22:24], "little")
         computed_checksum = checksum16(payload)
+        computed_checksum_excluding_peer_word = checksum16_excluding_peer_word(payload)
         command_id = int.from_bytes(payload[4:6], "little")
         result["header"] = {
             "raw_hex": payload[:HEADER_LEN].hex(),
@@ -191,8 +214,11 @@ def decode_payload(payload: bytes) -> dict[str, Any]:
             "checksum": checksum_field,
             "checksum_computed": computed_checksum,
             "checksum_valid": checksum_field == computed_checksum,
+            "checksum_excluding_peer_word_computed": computed_checksum_excluding_peer_word,
+            "checksum_excluding_peer_word_valid": checksum_field == computed_checksum_excluding_peer_word,
         }
         result["body"] = parse_service_block(body)
+        result["short_body"] = decode_short_body(command_id, body)
         result["null_strings_after_header"] = split_null_strings(payload, HEADER_LEN)
 
     url_values = [item["url"] for item in result["urls"]]
@@ -247,12 +273,21 @@ def build_reply(payload: bytes, args: argparse.Namespace) -> bytes | None:
                 args.ds_service_types,
                 status_byte=args.ds_table_status_byte,
                 length_endian=args.ds_table_length_endian,
+                size_field=args.ds_table_size_field,
                 include_count=args.ds_table_include_count,
             ),
             args=args,
         )
     if args.reply_mode == "ds-session-ack":
         return build_ds_session_ack(payload, args)
+    if args.reply_mode == "ds-registration-only-ack":
+        return build_ds_registration_only_ack(payload, args)
+    if args.reply_mode == "estoneii-ds-ack":
+        return build_estoneii_ds_ack(payload, args)
+    if args.reply_mode == "ds-toggle-ack":
+        return build_ds_toggle_ack(payload, args)
+    if args.reply_mode == "ds-toggle-copy-ack":
+        return build_ds_toggle_copy_ack(payload, args)
     raise ValueError(f"unsupported reply mode: {args.reply_mode}")
 
 
@@ -281,6 +316,87 @@ def build_ds_session_ack(payload: bytes, args: argparse.Namespace) -> bytes | No
     return build_framed_reply(payload, bytes([args.reply_status & 0xFF]), args=args)
 
 
+def is_ds_registration_report(payload: bytes) -> bool:
+    if len(payload) < HEADER_LEN or payload[:2] != b"m~":
+        return False
+    command_id = int.from_bytes(payload[4:6], "little")
+    body_length = int.from_bytes(payload[20:22], "little")
+    return command_id == 0x0011 and body_length >= 100 and len(payload) >= HEADER_LEN + body_length
+
+
+def build_ds_registration_only_ack(payload: bytes, args: argparse.Namespace) -> bytes | None:
+    if not is_ds_registration_report(payload):
+        return None
+    return build_framed_reply(
+        payload,
+        build_ds_address_table_body(
+            args.ds_url,
+            args.ds_service_types,
+            status_byte=args.ds_table_status_byte,
+            length_endian=args.ds_table_length_endian,
+            size_field=args.ds_table_size_field,
+            include_count=args.ds_table_include_count,
+        ),
+        args=args,
+    )
+
+
+def build_estoneii_ds_ack(payload: bytes, args: argparse.Namespace) -> bytes | None:
+    if is_ds_registration_report(payload):
+        return build_framed_reply(
+            payload,
+            build_ds_address_table_body(
+                args.ds_url,
+                args.ds_service_types,
+                status_byte=args.ds_table_status_byte,
+                length_endian=args.ds_table_length_endian,
+                size_field=args.ds_table_size_field,
+                include_count=args.ds_table_include_count,
+            ),
+            command_id=int.from_bytes(payload[4:6], "little") ^ 0x8000,
+            args=with_overrides(args, reply_header6=0x47),
+        )
+
+    if len(payload) >= HEADER_LEN + 6 and payload[:2] == b"m~":
+        command_id = int.from_bytes(payload[4:6], "little")
+        body_length = int.from_bytes(payload[20:22], "little")
+        if command_id == 0x8011 and body_length == 6:
+            timestamp = payload[HEADER_LEN + 1 : HEADER_LEN + 5]
+            return build_framed_reply(
+                payload,
+                timestamp,
+                command_id=command_id,
+                args=with_overrides(args, reply_header6=0xD3),
+            )
+
+    return None
+
+
+def with_overrides(args: argparse.Namespace, **overrides: Any) -> argparse.Namespace:
+    values = vars(args).copy()
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def build_ds_toggle_ack(payload: bytes, args: argparse.Namespace) -> bytes | None:
+    if len(payload) < HEADER_LEN or payload[:2] != b"m~":
+        return None
+    command_id = int.from_bytes(payload[4:6], "little")
+    ack_command_id = command_id ^ 0x8000
+    body = bytes([args.reply_status & 0xFF]) if len(payload) > HEADER_LEN else b""
+    return build_framed_reply(payload, body, command_id=ack_command_id, args=args)
+
+
+def build_ds_toggle_copy_ack(payload: bytes, args: argparse.Namespace) -> bytes | None:
+    if len(payload) < HEADER_LEN or payload[:2] != b"m~":
+        return None
+    command_id = int.from_bytes(payload[4:6], "little")
+    body = payload[HEADER_LEN:]
+    if command_id in {0x0011, 0x8011, 0x001F, 0x801F}:
+        return build_framed_reply(payload, body, command_id=command_id ^ 0x8000, args=args)
+    return build_framed_reply(payload, body, command_id=command_id ^ 0x8000, args=args)
+
+
 def resolve_reply_command_id(
     request_command_id: int,
     command_id: int | None,
@@ -294,6 +410,8 @@ def resolve_reply_command_id(
         return (request_command_id + 1) & 0xFFFF
     if command_mode == "zero":
         return 0
+    if command_mode == "xor-high-bit":
+        return request_command_id ^ 0x8000
     raise ValueError(f"unsupported reply command mode: {command_mode}")
 
 
@@ -304,6 +422,8 @@ def apply_reply_header_options(header: bytearray, args: argparse.Namespace | Non
         header[2] = (header[2] + args.reply_seq_delta) & 0xFF
     if getattr(args, "reply_header3", None) is not None:
         header[3] = args.reply_header3 & 0xFF
+    if getattr(args, "reply_header6", None) is not None:
+        header[6] = args.reply_header6 & 0xFF
 
 
 def build_framed_reply(
@@ -362,6 +482,7 @@ def build_ds_address_table_body(
     *,
     status_byte: int = 0,
     length_endian: str = "little",
+    size_field: str = "entry-count",
     include_count: bool = False,
 ) -> bytes:
     encoded_url = ds_url.encode("ascii")
@@ -380,8 +501,12 @@ def build_ds_address_table_body(
     if len(entries) > 0xFFFF:
         raise ValueError("DS address table body is too large")
     prefix = bytearray([status_byte & 0xFF])
-    if length_endian != "none":
+    if size_field == "byte-length" and length_endian != "none":
         prefix.extend(len(entries).to_bytes(2, length_endian))
+    elif size_field == "entry-count" and length_endian != "none":
+        prefix.extend(len(service_types).to_bytes(2, length_endian))
+    elif size_field != "none":
+        raise ValueError(f"unsupported DS table size field: {size_field}")
     if include_count:
         if len(service_types) > 255:
             raise ValueError("too many DS service types for one-byte count")
@@ -510,6 +635,10 @@ def parse_args() -> argparse.Namespace:
             "service-list-ack",
             "ds-address-table-ack",
             "ds-session-ack",
+            "ds-registration-only-ack",
+            "estoneii-ds-ack",
+            "ds-toggle-ack",
+            "ds-toggle-copy-ack",
         ),
         default="none",
         help="Experimental reply mode",
@@ -520,7 +649,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reply-status", type=int, default=1, help="Status value for status ACK experiments")
     parser.add_argument(
         "--reply-command-mode",
-        choices=("same", "increment", "zero"),
+        choices=("same", "increment", "zero", "xor-high-bit"),
         default="same",
         help="How to set the framed reply command id when --reply-mode builds a DS frame",
     )
@@ -535,6 +664,12 @@ def parse_args() -> argparse.Namespace:
         type=lambda value: int(value, 0),
         default=None,
         help="Override framed reply header byte at offset 3, e.g. 0x01",
+    )
+    parser.add_argument(
+        "--reply-header6",
+        type=lambda value: int(value, 0),
+        default=None,
+        help="Override framed reply header byte at offset 6, e.g. 0x47 for GetServiceAddr ACK",
     )
     parser.add_argument(
         "--sc-url",
@@ -561,7 +696,13 @@ def parse_args() -> argparse.Namespace:
         "--ds-table-length-endian",
         choices=("little", "big", "none"),
         default="little",
-        help="Endian for the two-byte address-table length prefix, or none to omit it",
+        help="Endian for the two-byte address-table size/count prefix",
+    )
+    parser.add_argument(
+        "--ds-table-size-field",
+        choices=("entry-count", "byte-length", "none"),
+        default="entry-count",
+        help="Meaning of the two-byte field after the status byte in ds-address-table bodies",
     )
     parser.add_argument(
         "--ds-table-include-count",

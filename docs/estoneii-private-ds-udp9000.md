@@ -200,3 +200,54 @@ VpnMode=0 LoginIP=192.168.100.123
 
 - UDP/9000 DS 私有响应器，用于通过 `LoginToDSC/LogToDS`。
 - HTTP SOAP `SCService`，用于接收设备发出的 `LOGIN` 并返回 `LOGIN_ACK`。
+
+## 2026-04-27 DS 注册与心跳确认
+
+反汇编 `SiteUnit` 后确认，外层帧除了 `cmd` 外，还使用包头 offset `6` 作为业务分发码：
+
+- `0x46`：设备发出的 `GetServiceAddr/LogToDS` 请求。
+- `0x47`：平台返回的 `GetServiceAddr` 应答。
+- `0xd2`：设备发出的心跳请求。
+- `0xd3`：平台返回的心跳应答。
+
+`GetServiceAddr` 应答 body 结构为：
+
+```text
+u8     status        # 0=Success, 1=Fail, 2=UnRegister
+u16le  entry_count   # 不是字节长度
+repeat entry_count:
+  u8   service_type
+  u8   url_length
+  bytes url           # 例如 udp://192.168.100.123:9000
+```
+
+成功掩码要求返回 `0,5,6,7,8,9` 六类服务地址。实测有效 ACK：
+
+```text
+cmd=0x8011
+header[6]=0x47
+body=00 06 00 + entries(type/len/url...)
+```
+
+设备日志确认：
+
+```text
+[GetServiceAddr] LogToDS return [0]: Success
+[StationName= ...]Register OK!
+```
+
+心跳 ACK 结构：
+
+```text
+cmd=0x8011
+header[6]=0xd3
+body=<request_body[1:5]>   # 4 字节 Unix 时间戳，小端
+```
+
+脚本入口：
+
+```powershell
+python backend\scripts\estoneii_sc_lab.py --duration 300 --udp-ports 9000,7000 --http-ports 80,8000 --reply-mode estoneii-ds-ack --ds-table-status-byte 0 --ds-url udp://192.168.100.123:9000 --ds-service-types 0,5,6,7,8,9
+```
+
+这个模式已经能让设备进入 `Register OK`，并在监听期间持续响应 DS/RDS 心跳。监听停止后设备会在下一轮心跳超时后重新 `LogToDS`，这是预期行为。
