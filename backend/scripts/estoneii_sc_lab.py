@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import select
 import socket
 import time
 from argparse import Namespace
@@ -43,7 +44,7 @@ def start_http_ports(host: str, ports: list[int], output_root: Path) -> list[Any
     return servers
 
 
-def run_udp_responder(args: argparse.Namespace, output_root: Path) -> int:
+def run_udp_responders(args: argparse.Namespace, output_root: Path) -> int:
     udp_args = Namespace(
         reply_mode=args.reply_mode,
         reply_prefix_size=args.reply_prefix_size,
@@ -60,46 +61,58 @@ def run_udp_responder(args: argparse.Namespace, output_root: Path) -> int:
         ds_table_length_endian=args.ds_table_length_endian,
         ds_table_include_count=args.ds_table_include_count,
     )
-    output_dir = output_root / "ds-udp9000"
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((args.host, args.udp_port))
-    sock.settimeout(1.0)
-    safe_print(f"DS UDP responder listening on {args.host}:{args.udp_port}, reply_mode={args.reply_mode}")
+    ports = parse_int_list(args.udp_ports or str(args.udp_port))
+    sockets: list[socket.socket] = []
+    for port in ports:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((args.host, port))
+        sock.setblocking(False)
+        sockets.append(sock)
+        safe_print(f"UDP responder listening on {args.host}:{port}, reply_mode={args.reply_mode}")
 
     deadline = time.monotonic() + args.duration
     count = 0
     while time.monotonic() < deadline:
-        try:
-            payload, remote = sock.recvfrom(args.buffer_size)
-        except socket.timeout:
+        readable, _, _ = select.select(sockets, [], [], 1.0)
+        if not readable:
             continue
 
-        local = sock.getsockname()
-        decoded = decode_payload(payload)
-        reply = build_reply(payload, udp_args)
-        if reply is not None:
-            sock.sendto(reply, remote)
+        for sock in readable:
+            payload, remote = sock.recvfrom(args.buffer_size)
+            local = sock.getsockname()
+            decoded = decode_payload(payload)
+            reply = build_reply(payload, udp_args) if payload.startswith(b"m~") else None
+            if reply is not None:
+                sock.sendto(reply, remote)
 
-        count += 1
-        stem = f"{utc_now_text()}_{remote[0].replace(':', '-')}_{remote[1]}"
-        save_capture(output_dir, stem, payload, decoded, remote, local, reply)
-        summary = decoded.get("summary", {})
-        safe_print(
-            f"[udp {count}] {remote[0]}:{remote[1]} {len(payload)} bytes "
-            f"variant={summary.get('packet_variant')} "
-            f"seq={decoded.get('header', {}).get('sequence')} "
-            f"cmd={decoded.get('header', {}).get('command_id')} "
-            f"checksum={decoded.get('header', {}).get('checksum_valid')} "
-            f"reply={0 if reply is None else len(reply)}"
-        )
-    sock.close()
+            count += 1
+            output_dir = output_root / f"udp-{local[1]}"
+            stem = f"{utc_now_text()}_{remote[0].replace(':', '-')}_{remote[1]}"
+            save_capture(output_dir, stem, payload, decoded, remote, local, reply)
+            summary = decoded.get("summary", {})
+            safe_print(
+                f"[udp {count}] local={local[1]} {remote[0]}:{remote[1]} {len(payload)} bytes "
+                f"variant={summary.get('packet_variant')} "
+                f"seq={decoded.get('header', {}).get('sequence')} "
+                f"cmd={decoded.get('header', {}).get('command_id')} "
+                f"checksum={decoded.get('header', {}).get('checksum_valid')} "
+                f"reply={0 if reply is None else len(reply)}"
+            )
+
+    for sock in sockets:
+        sock.close()
     return count
+
+
+def parse_int_list(text: str) -> list[int]:
+    return [int(item.strip()) for item in text.split(",") if item.strip()]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run an eStoneII DS UDP + SC HTTP lab responder.")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--udp-port", type=int, default=9000)
+    parser.add_argument("--udp-ports", default="", help="Comma-separated UDP ports; overrides --udp-port")
     parser.add_argument("--http-ports", default="80,8000", help="Comma-separated HTTP ports")
     parser.add_argument("--duration", type=int, default=90)
     parser.add_argument("--buffer-size", type=int, default=8192)
@@ -118,6 +131,7 @@ def parse_args() -> argparse.Namespace:
             "status-u32-ack",
             "service-list-ack",
             "ds-address-table-ack",
+            "ds-session-ack",
         ),
         default="empty-ack",
     )
@@ -141,10 +155,10 @@ def main() -> int:
     args = parse_args()
     output_root = Path(args.output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
-    ports = [int(item.strip()) for item in args.http_ports.split(",") if item.strip()]
+    ports = parse_int_list(args.http_ports)
     servers = start_http_ports(args.host, ports, output_root)
     try:
-        packets = run_udp_responder(args, output_root)
+        packets = run_udp_responders(args, output_root)
         safe_print(f"finished: udp_packets={packets}, output={output_root}")
     finally:
         for server in servers:

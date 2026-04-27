@@ -1484,16 +1484,18 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 地址表成功掩码疑似要求 type `0,5,6,7,8,9` 全部出现，对应诊断、信号、发布、事件、实时、历史通道
 - 新增联合实验脚本：
   - `backend/scripts/estoneii_sc_lab.py`
-  - 同时监听 `UDP/9000` 和 HTTP `SCService`
+  - 同时监听 `UDP/9000,7000` 和 HTTP `SCService`
   - 当前能稳定收到 `cmd=17` 私有 DS 握手并返回合法校验应答
-  - 尚未收到设备 HTTP `LOGIN`，需要继续验证 DS 地址表后的通道状态/端口字段
+  - 设备重启时 `XML.log` 已生成 `[Send CMD:LOGIN]`，但平台 HTTP `80/8000` 未收到连接
+  - 后续联调在 `UDP/7000` 捕获到 `cmd=0x8011` 30 字节状态包，在 `UDP/9000` 捕获到 `cmd=0x001f` 24 字节短包
+  - 说明该固件的 B 接口 XML 仍可能封装在 DS/RDS 私有 UDP 通道里，而不是裸 HTTP POST
 - 当前阶段结论：
   - 固件配置、XML 配置、SO 路径、测试直连模式已经打通
   - “设备没有向平台发包”的问题已经排除
   - `UDP/9000` 帧头、校验和、请求 body 和 DS 地址表应答结构已基本解析
-  - 当前阻塞点是 `GetServiceAddr/LoginToDSC` 成功后的 DS 通道确认，HTTP `LOGIN_ACK` 模拟器已准备好但还没被设备打到
+  - 当前阻塞点是 `GetServiceAddr/LoginToDSC` 之后的 `0x8011/0x001f` 短心跳 ACK 格式
 - 现场验证命令：
   - 查看设备业务日志：`http://192.168.100.100/fsu_log/XML.log`
   - 抓 `tt_proxy` 状态包：`python backend/scripts/ttproxy_udp_responder.py --host 0.0.0.0 --port 10378`
   - 抓 DS 登录握手：`python backend/scripts/ds_udp9000_responder.py --port 9000 --reply-mode none --verbose`
-  - 联合试验 DS/SC：`python backend/scripts/estoneii_sc_lab.py --duration 90 --http-ports 80,8000 --reply-mode ds-address-table-ack --ds-table-status-byte 0 --ds-url udp://192.168.100.123:9000 --ds-service-types 0,5,6,7,8,9`
+  - 联合试验 DS/SC：`python backend/scripts/estoneii_sc_lab.py --duration 120 --udp-ports 9000,7000 --http-ports 80,8000 --reply-mode ds-session-ack --reply-status 0`

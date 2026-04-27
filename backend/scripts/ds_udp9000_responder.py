@@ -251,6 +251,8 @@ def build_reply(payload: bytes, args: argparse.Namespace) -> bytes | None:
             ),
             args=args,
         )
+    if args.reply_mode == "ds-session-ack":
+        return build_ds_session_ack(payload, args)
     raise ValueError(f"unsupported reply mode: {args.reply_mode}")
 
 
@@ -266,6 +268,17 @@ def build_empty_ack(payload: bytes, *, increment_command: bool) -> bytes:
     reply[22:24] = (0).to_bytes(2, "little")
     reply[22:24] = checksum16(bytes(reply)).to_bytes(2, "little")
     return bytes(reply)
+
+
+def build_ds_session_ack(payload: bytes, args: argparse.Namespace) -> bytes | None:
+    if len(payload) < HEADER_LEN or payload[:2] != b"m~":
+        return None
+    command_id = int.from_bytes(payload[4:6], "little")
+    if command_id == 0x0011:
+        return build_framed_reply(payload, bytes([args.reply_status & 0xFF]), args=args)
+    if command_id in {0x001F, 0x8011}:
+        return payload
+    return build_framed_reply(payload, bytes([args.reply_status & 0xFF]), args=args)
 
 
 def resolve_reply_command_id(
@@ -496,6 +509,7 @@ def parse_args() -> argparse.Namespace:
             "status-u32-ack",
             "service-list-ack",
             "ds-address-table-ack",
+            "ds-session-ack",
         ),
         default="none",
         help="Experimental reply mode",

@@ -118,6 +118,14 @@ addr[3]=ftp ftp://root:hello@192.168.100.100
 - `--ds-table-length-endian little|big|none`
 - `--ds-table-include-count`
 
+2026-04-27 重启联调进一步确认：
+
+- `XML.log` 在 `12:03:03` 生成了新的 `[Send CMD:LOGIN]`，但平台 HTTP `80/8000` 没收到连接。
+- 同时监听 `UDP/9000` 和 `UDP/7000` 后，发现后续业务/状态通道不走 HTTP，而是继续走私有 UDP。
+- `UDP/7000` 收到固定 30 字节包，命令号 `0x8011`，body 长 6，形态为 `00 + unix_time_le + 00`，校验按 `cmd=17` 同一算法成立。
+- `UDP/9000` 同时收到 24 字节 `cmd=0x001f`，无 body；其校验与 `cmd=17` 算法不同，当前观察为普通求和再排除一段 `c1 62 00 2d` 后匹配。
+- 对 `cmd=0x8011` 和 `cmd=0x001f` 做原包 echo 后，设备仍持续发送，说明短心跳还需要专用 ACK 格式。
+
 设备日志里出现过：
 
 ```text
@@ -135,7 +143,8 @@ python backend\scripts\ds_udp9000_responder.py --decode-file backend\logs\ds-udp
 python backend\scripts\ds_udp9000_responder.py --port 9000 --reply-mode none --verbose
 python backend\scripts\ds_udp9000_responder.py --port 9000 --reply-mode status-u32-ack --reply-status 1 --verbose
 python backend\scripts\ds_udp9000_responder.py --port 9000 --reply-mode service-list-ack --sc-url http://192.168.100.123:8000/services/SCService --verbose
-python backend\scripts\estoneii_sc_lab.py --duration 90 --http-ports 80,8000 --reply-mode ds-address-table-ack --ds-table-status-byte 0 --ds-url udp://192.168.100.123:9000 --ds-service-types 0,5,6,7,8,9
+python backend\scripts\estoneii_sc_lab.py --duration 90 --udp-ports 9000,7000 --http-ports 80,8000 --reply-mode ds-address-table-ack --ds-table-status-byte 0 --ds-url udp://192.168.100.123:9000 --ds-service-types 0,5,6,7,8,9
+python backend\scripts\estoneii_sc_lab.py --duration 120 --udp-ports 9000,7000 --http-ports 80,8000 --reply-mode ds-session-ack --reply-status 0
 ```
 
 这些模式会自动生成 `6d7e` 帧头、body 长度和校验和。
