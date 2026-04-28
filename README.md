@@ -349,7 +349,74 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 - 当前默认提供 `json_line / telemetry_json / estone_json` 三类解析器。
 - 如果后续 DTU 上送的是厂商私有二进制帧，只需要在 `backend/app/services/protocol_adapters.py` 新增解析器，不需要改告警、时序库和前端展示链路。
 
-### 8.6 腾讯云短信（重要告警）
+### 8.6 FSU-2808IM 探针网关
+
+- `FSU_GATEWAY_ENABLED`：是否启用 FSU-2808IM 探针 UDP 监听。
+- `FSU_UDP_BIND_HOST`：UDP 监听地址，现场联调必须为 `0.0.0.0`。
+- `FSU_DSC_PORT`：DSC UDP 监听端口，默认 `9000`。
+- `FSU_RDS_PORT`：RDS UDP 监听端口，默认 `7000`。
+- `FSU_SOAP_PORT`：平台 HTTP 端口，本地默认 `8000`。
+- `FSU_RAW_LOG_DIR`：原始报文 JSONL 目录，默认 `logs/fsu_raw_packets`。
+
+启动后控制台应看到：
+
+```text
+FSU gateway enabled: true
+UDP DSC listening on 0.0.0.0:9000
+UDP RDS listening on 0.0.0.0:7000
+SOAP endpoint: /services/SCService
+raw log dir: logs/fsu_raw_packets
+```
+
+健康检查：
+
+```powershell
+curl.exe http://127.0.0.1:8000/fsu-gateway/health
+```
+
+本机 UDP 自测：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\test-fsu-udp.ps1
+```
+
+如果完整平台因数据库维护暂时无法启动，只做现场探针收包验证时可启动 probe-only 入口：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-fsu-gateway-probe.ps1 -HttpPort 8000
+```
+
+SOAP 自测：
+
+```powershell
+curl.exe -i -X POST "http://127.0.0.1:8000/services/SCService" -H "Content-Type: text/xml; charset=utf-8" --data-binary "<soap><body>hello</body></soap>"
+```
+
+原始日志：
+
+```powershell
+Get-Content backend\logs\fsu_raw_packets\$(Get-Date -Format yyyy-MM-dd).jsonl -Tail 20
+```
+
+Windows 防火墙放行命令需要在管理员 PowerShell 中执行：
+
+```powershell
+netsh advfirewall firewall add rule name="FSU UDP 9000" dir=in action=allow protocol=UDP localport=9000
+netsh advfirewall firewall add rule name="FSU UDP 7000" dir=in action=allow protocol=UDP localport=7000
+netsh advfirewall firewall add rule name="FSU Platform HTTP" dir=in action=allow protocol=TCP localport=8000
+```
+
+如果收不到真实 FSU 数据，按顺序检查：
+
+- Windows 本机 IP 是否为 `192.168.100.123`。
+- FSU 设备 `192.168.100.100` 是否能 ping 通本机，或本机是否能 ping 通设备。
+- Windows 防火墙是否放行 UDP `9000`、UDP `7000`、TCP `8000`。
+- 平台后端是否绑定 `0.0.0.0:8000`，不是只绑定 `127.0.0.1`。
+- UDP `9000/7000` 是否被其他程序占用。
+- `backend/logs/fsu_raw_packets/YYYY-MM-DD.jsonl` 是否生成。
+- 设备是否已经重启并重新读取 `DscIp/RDSIp/SCIP` 配置。
+
+### 8.7 腾讯云短信（重要告警）
 
 - `SMS_TENCENT_ENABLED`：是否启用腾讯云短信通道（默认 `false`）。
 - `SMS_TENCENT_SECRET_ID`：腾讯云 API 密钥 ID。
@@ -1528,3 +1595,57 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
   - 长期运行接入守护进程：`python backend/scripts/estoneii_ds_gateway.py --ds-url udp://192.168.100.123:9000 --udp-ports 9000,7000`
   - 长期运行并入库：`python backend/scripts/estoneii_ds_gateway.py --ds-url udp://192.168.100.123:9000 --udp-ports 9000,7000 --backend-ingest-url http://127.0.0.1:8000/api/v1/ingest/telemetry --site-code 51051243812345 --site-name 凤凰广场 --fsu-code 51051243812345 --fsu-name eStoneII-FSU`
   - Windows 脚本启动：`powershell -ExecutionPolicy Bypass -File scripts/start-estoneii-ds-gateway.ps1 -BackendIngestUrl http://127.0.0.1:8000/api/v1/ingest/telemetry -SiteName 凤凰广场`
+
+### 15.33 eStoneII 本地 FSUService 探测记录（2026-04-27）
+- 真实设备本地 SOAP 服务入口已验证为：
+  - `http://192.168.100.100:8080/`
+  - 不是 `/services/FSUService`
+  - SOAP namespace 为 `http://FSUService.chinatowercom.com`
+- `GET_FSUINFO(Code=101)` 可以成功调用：
+  - 返回 SOAP `invokeResponse/invokeReturn`
+  - 内层 XML 的 `PK_Type/Name` 为 `LOGIN`
+  - 可取到 `FsuId/FsuCode=51051243812345` 和 5 个在线设备 ID
+- `GET_DATA(Code=401)` 的安全请求必须带 `Info/DeviceList`：
+  - 裸 `FsuId/FsuCode` 会触发设备日志 `[ParseXmlData]ERR`，并导致 8080 WebService 重启
+  - `Code=201` 被设备判定为错误命令
+  - `Info/Values/DeviceList` 层级同样会触发解析错误
+- 平台主动轮询已按这个结论修正：
+  - 维谛专用轮询默认访问 `http://<FsuIP>:8080/`
+  - SOAP namespace 使用 `FSUService`
+  - `GET_DATA` 自动带登录时保存的 `DeviceList`
+- 当前真实设备 `GET_DATA_ACK` 仍返回空 `Values/DeviceList`：
+  - 即使请求里带 `TSemaphore` 信号列表，响应仍无遥测点
+  - 说明数据落地还不能依赖这个 HTTP 轮询口
+  - 下一步继续以 `estoneii_ds_gateway.py` 的 DS/RDS 私有 UDP 业务帧为主线解析实时数据、历史数据和告警
+- 新增探测脚本：
+  - `backend/scripts/estoneii_fsu_soap_probe.py`
+  - 示例：
+    `python backend/scripts/estoneii_fsu_soap_probe.py --url http://192.168.100.100:8080/ --fsu-code 51051243812345 --variants info-devices`
+
+### 15.34 FSU-2808IM 平台内置探针模块（2026-04-27）
+- 新增平台内置 `fsu-gateway` 探针模块：
+  - UDP `9000` 记录为 `UDP_DSC`
+  - UDP `7000` 记录为 `UDP_RDS`
+  - HTTP `POST /services/SCService` 记录为 `HTTP_SOAP`
+  - 原始报文写入 `backend/logs/fsu_raw_packets/YYYY-MM-DD.jsonl`
+- 探针阶段只做接收、HEX 留存、基础 ACK 和 SOAP `invokeResponse`，不解析 DSC/RDS 业务字段。
+- 新增健康检查：`GET /fsu-gateway/health`，返回启用状态、UDP 端口、绑定地址、SOAP 路径和原始日志目录。
+- 本地栈后端已改为绑定 `0.0.0.0:8000`，便于局域网 FSU 访问平台 HTTP 服务。
+- 新增 UDP 自测脚本：`scripts/test-fsu-udp.ps1`。
+- 新增 probe-only 启动脚本：`scripts/start-fsu-gateway-probe.ps1`，用于数据库不可用时继续做现场 UDP/SOAP 原始包验证。
+
+### 15.35 FSU-2808IM SiteUnit 静态逆向收口记录（2026-04-28）
+- 已完成 SiteUnit 的离线静态逆向与数据流恢复，目标是确认登录/注册响应的真实 ACK 结构。
+- 已确认的关键结论：
+  - `ParseData` 在 `frame[6] == 0x47` 时分发到登录状态处理函数 `0x7e804`。
+  - 响应体起点为 `frame + 0x18`，也就是 `bodyOffset = 24`。
+  - `checksumOffset = 22`，`lengthLE = totalLength - 24`。
+  - `body[0]` 是状态字节：`0=Success`、`1=Fail`、`2=UnRegister`。
+  - 登录状态处理函数在成功/注销路径上继续读取 `body[1..]`，但完整 body 布局尚未闭合。
+  - `ctx+0x129` 是内部状态字节，和成功/失败/注销分支联动，但还不能直接等同于可发送 ACK。
+- 已新增的离线分析脚本位于：
+  - `backend/scripts/reverse-fsu-siteunit/`
+  - `backend/scripts/fsu-ack-experiments/`
+- 已生成的静态分析报告位于：
+  - `backend/logs/fsu_reverse/`
+- 当前仍未获得可发送 `ackHex`，也未进入可回发 ACK 的阶段。
