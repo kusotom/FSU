@@ -80,6 +80,8 @@ fsu-platform/
 - `CHANGELOG.md`：持续记录重要功能变更与收口情况。
 - `docs/unisms-sms-task-record.md`：UniSMS 接入执行记录与剩余工作。
 - `docs/estoneii-private-ds-udp9000.md`：eStoneII `SiteUnit` 在 SOAP B 接口前的 DS UDP/9000 私有握手解析。
+- `docs/fsu-2808im-protocol-notes.md`：FSU-2808IM raw packet 逆向分析笔记，记录已识别帧、候选字段和实验结论；候选 ACK 尚未确认为线上协议。
+- `docs/fsu-2808im-next-steps.md`：FSU-2808IM 后续只读观察、日志分析、告警识别和面板展示计划。
 - `backend/app/integrations/unisms/README.md`：UniSMS 供应商适配层说明。
 - `backend/.env.unisms.example`：UniSMS 实发模式环境变量模板。
 
@@ -209,6 +211,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 ## 7. 核心接口（按模块）
 
 以下均为 `API_V1_PREFIX=/api/v1` 下的路径。
+
+### 7.0 FSU-2808IM 只读调试
+
+- `GET /fsu-debug/raw-packets`：只读读取 `backend/logs/fsu_raw_packets/YYYY-MM-DD.jsonl`，汇总 frameClass、remotePort、typeA、length、seqLE、URI、UNKNOWN 和新类型统计，并返回最近原始包用于排查。
+- 前端页面：`/fsu-debug`，在“FSU调试”入口查看 raw packet 逆向解析结果并复制 `rawHex`。
+
+安全边界：
+- 该调试面板只读取 raw packet 日志，不发送 UDP 包。
+- 不启用自动 ACK，不修改 `fsu-gateway` 回包逻辑，不写业务主表。
+- 页面明确标注：当前协议解析为逆向分析结果，候选 ACK 未确认，线上回包未启用。
 
 ### 7.1 认证与会话
 
