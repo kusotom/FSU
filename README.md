@@ -1700,3 +1700,121 @@ python scripts\benchmark_timescaledb_stress.py --rows 1200000 --workers 8 --batc
 - 已生成的静态分析报告位于：
   - `backend/logs/fsu_reverse/`
 - 当前仍未获得可发送 `ackHex`，也未进入可回发 ACK 的阶段。
+
+
+# FSU DSC/RDS 下一步离线工具包
+
+这个包是给当前 `fsu-platform` 项目使用的离线工具包。  
+它不访问网络、不打开 socket、不发送 UDP、不生成 ACK 实验流量。
+
+## 包含文件
+
+```text
+backend/app/modules/fsu_gateway/parser/fsu-frame-v03-utils.js
+backend/scripts/verify-fsu-checksum.js
+backend/scripts/build-fsu-ack-frame-offline.js
+backend/scripts/analyze-dsc-config-209-245-diff.js
+backend/logs/fsu_reverse/siteunit2-class46-return-analysis-2026-05-01.md
+backend/logs/fsu_reverse/siteunit2-class46-return-analysis-2026-05-01.json
+```
+
+## 运行方式
+
+把本包里的 `backend/` 覆盖/复制到你的项目根目录：
+
+```text
+C:\Users\测试\Desktop\动环\fsu-platform
+```
+
+然后运行：
+
+```bash
+node backend/scripts/verify-fsu-checksum.js --input backend/logs/fsu_raw_packets/2026-05-01.jsonl
+node backend/scripts/analyze-dsc-config-209-245-diff.js --input backend/logs/fsu_raw_packets/2026-05-01.jsonl
+```
+
+离线 ACK 候选构造：
+
+```bash
+node backend/scripts/build-fsu-ack-frame-offline.js --hex <一条RDS_SHORT_30原始包hex>
+```
+
+注意：这个脚本只输出 hex，不发送 UDP。
+
+## 本轮新增关键结论
+
+```text
+classByte=0x46:
+  DSC_REGISTER_CONFIG_REQUEST 候选
+
+classByte=0x47:
+  DSC_REGISTER_CONFIG_RESPONSE / LOG_TO_DS_RETURN 候选
+
+classByte=0x47 payload[0]:
+  0x00 = Success
+  0x01 = Fail
+  0x02 = UnRegister
+
+ctx+0x129:
+  登录/注册结果字段
+```
+
+## 安全边界
+
+```text
+未发送 UDP
+未新增线上 ACK
+未运行 send-one-shot-ack.js
+未修改实时网关回包逻辑
+未写业务主表
+未生成刷机包
+```
+# FSU classByte=0x47 offline tools
+
+This package contains offline-only tools and reports for the SiteUnit2 `classByte=0x47` DSC register/config response analysis.
+
+## Safety
+
+These scripts do **not** open sockets and do **not** send UDP. They only parse or generate payload hex.
+
+Do not use generated payloads for online ACK or register-response experiments until the complete 0x47 frame header/checksum is recovered and validated.
+
+## Files
+
+```text
+backend/scripts/parse-class47-register-response-offline.js
+backend/scripts/build-class47-register-response-payload-offline.js
+backend/logs/fsu_reverse/siteunit2-class47-payload-entry-analysis-2026-05-01.md
+backend/logs/fsu_reverse/siteunit2-class47-payload-entry-analysis-2026-05-01.json
+backend/logs/fsu_raw_packets/dsc-rds-annotation-v0.5-class47-2026-05-01.md
+backend/logs/fsu_raw_packets/dsc-rds-annotation-v0.5-class47-2026-05-01.json
+```
+
+## Example build payload
+
+```powershell
+node backend\scripts\build-class47-register-response-payload-offline.js `
+  --result success `
+  --entry "0=udp://192.168.100.123:6000" `
+  --entry "5=udp://192.168.100.123:6000" `
+  --entry "6=udp://192.168.100.123:6000" `
+  --entry "7=udp://192.168.100.123:7000" `
+  --entry "8=udp://192.168.100.123:6000" `
+  --entry "9=udp://192.168.100.123:6000"
+```
+
+## Example parse payload
+
+```powershell
+node backend\scripts\parse-class47-register-response-offline.js --payload-hex <payloadHex>
+```
+
+## Current conclusions
+
+- `0x46` is DSC register/config request.
+- `0x47` is DSC register/config response candidate.
+- `0x47` payload format is high-confidence: `resultCode + serviceCountLE + entries(type,len,uri)`.
+- Required channel mask appears to be `0x3f` for types `0/5/6/7/8/9`.
+- `payload[0]=0` alone is not enough for full Register OK.
+- Still no online ACK/register-response experiment is recommended.
+

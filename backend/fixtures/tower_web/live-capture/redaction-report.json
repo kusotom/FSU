@@ -1,0 +1,21 @@
+{
+  "redactionCount": 11,
+  "redactedCategories": [
+    "Cookie",
+    "Authorization",
+    "Token",
+    "Session",
+    "JSESSIONID",
+    "loginName",
+    "password",
+    "mobile",
+    "phone"
+  ],
+  "safety": {
+    "onlyGetRequests": true,
+    "noPostPutDeletePatch": true,
+    "noFormSubmit": true,
+    "noButtonsClicked": true,
+    "noInputsModified": true
+  }
+}

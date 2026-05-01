@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     dtu_gateway_backend_retry_times: int = 2
     dtu_gateway_raw_log_enabled: bool = True
     dtu_gateway_raw_log_dir: str = "logs/dtu-raw"
+    fsu_gateway_enabled: bool = False
+    fsu_udp_bind_host: str = "0.0.0.0"
+    fsu_soap_port: int = 8000
+    fsu_dsc_port: int = 9000
+    fsu_rds_port: int = 7000
+    fsu_raw_log_dir: str = "logs/fsu_raw_packets"
+    fsu_parse_debug: bool = False
 
     system_rule_eval_enabled: bool = False
     system_rule_eval_interval_seconds: int = 30

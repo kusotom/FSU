@@ -1,0 +1,633 @@
+
+
+
+
+
+
+
+
+
+
+<!DOCTYPE HTML>
+<!-- saved from -->
+
+
+
+   
+   
+<html>
+<head>
+	<title>铁塔-欢迎登录</title>
+	<meta charset="UTF-8">
+	<meta content="text/html; charset=UTF-8" http-equiv="Content-Type">
+	<meta content="IE=Edge http-equiv=X-UA-Compatible">
+	<link rel="stylesheet" type="text/css" 
+	href="/baf/css/login_itower/base.css">
+	<link rel="stylesheet" type="text/css" href="/baf/css/login_itower/passport-2015.css">
+	<link rel="shortcut icon" href="/baf/images/iTower.ico"/>
+	
+
+<style>
+div#verifyArea{
+	display: block;
+	height: 40px;
+	position: relative;
+}
+
+.verifyinputArea{
+	height: 38px;
+	vertical-align: middle;
+	float: left;
+}
+
+.verifyinputArea .input_tips{
+	top:8px;
+	position: absolute;
+	left: 13px;
+	font-size: 14px;
+	line-height: 16px;
+	color: #aaa;
+	cursor: text;
+}
+.verifyinputArea .inputOuter{
+	width: 180px;
+	height: 30px;
+	background: none;
+	border: 1px solid #96a5b4;
+	border-radius: 1px;
+}
+
+.verifyinputArea .inputstyle{
+	width: 178px;
+	padding-top: 16px;
+	padding-bottom: 16px;
+	top: 3px;
+	padding: 4px 10px 1px 11px;
+	left: 0px;
+	border-radius: 3px;
+	color: #333;
+	font-size: 14px;
+	position: relative;
+	line-height: 16px;
+	border: 0;
+	background: 0;
+}
+
+.verifyimgArea{
+	vertical-align: middle;
+	width: 110px;
+	float: right;
+	position: relative;
+	height: 23px;
+	cursor: pointer;
+}
+
+.verifyimgArea .verifyimg{
+	width: 68px;
+	height: 23px;
+	position: absolute;
+	left: 0;
+}
+
+.verifyimgArea .verifyimg_tips{
+	color: #225592;
+	top: 25px;
+	left: 0px;
+	position: absolute;
+}
+
+.layer-shadow {
+    position: fixed;
+    z-index: 998;
+    width: 100%;
+    height: 100%;
+
+    filter: alpha(opacity=98);
+    background-color: #777;
+    opacity: 0.9;
+    -moz-opacity: 0.5;
+
+    display: none;
+}
+
+.layer {
+    z-index: 999;
+    margin-top: 10%;
+    margin-left: 50%;
+    height: 300px;
+    width: 400px;
+    background: #FFFFFF;
+    font: normal normal 14px/35px "宋体" !important;
+    position: absolute;
+    left: -200px;
+
+    -webkit-border-radius: 6px;
+    -moz-border-radius: 6px;
+    border-radius: 6px;
+    -moz-box-shadow: 0 0 10px 3px rgba(54, 54, 54, .5);
+    -webkit-box-shadow: 0 0 10px 3px rgba(54, 54, 54, .5);
+    box-shadow: 0 0 10px 3px rgba(54, 54, 54, .5);
+}
+
+.h1 {
+    margin-top: 20px;
+    text-align: center;
+    font-size: 36px;
+}
+
+.layer-display {
+    margin-top: 20px;
+    margin-left: 40px;
+    font-size: 20px;
+}
+
+.layer-input {
+    margin-top: 60px;
+    margin-left: 40px;
+    font-size: 20px;
+    width: 80%;
+}
+
+.layer-botton {
+    margin-top: 50px;
+    margin-left: 20px;
+    font-size: 20px;
+}
+
+.a_href{
+     color: #060501;
+ }
+
+.a_href:hover{
+    color: #EB4B4B;
+}
+
+.a_hrefurl{
+    color: #1E805B;
+}
+
+.a_hrefurl:hover{
+    color: #1E805B;
+}
+
+.login-form {
+    Z-INDEX: 4;
+    POSITION: relative;
+    PADDING-BOTTOM: 20px;
+    PADDING-LEFT: 20px;
+    WIDTH: 440px;
+    PADDING-RIGHT: 20px;
+    BACKGROUND: #fff;
+    OVERFLOW: visible;
+    PADDING-TOP: 20px;
+}
+
+.login-form .login-box .mt H1 {
+    POSITION: relative;
+    LINE-HEIGHT: 27px;
+    FONT-FAMILY: "微软雅黑";
+    FLOAT: center;
+    HEIGHT: 27px;
+    COLOR: #666;
+    FONT-SIZE: 20px;
+    TOP: -5px
+}
+.login-form .msg-wrap {
+    MARGIN: 2px 0px 5px;
+    MIN-HEIGHT: 15px;
+    HEIGHT: auto !important;
+}
+</style>
+
+<script type="text/javascript" src="/baf/js/jquery-3.6.0.min.js"></script>
+<script type="text/javascript" src="/baf/js/jquery.form.js"></script>
+<script type="text/javascript" src="/js/tongji.js"></script>
+<script type="text/javascript" src="/bootstrap/js/bootstrap.js"></script>
+<script type="text/javascript" src="/baf/js/crypto-js/lib/crypto-js.js"></script>
+    <script type="text/javascript" src="/baf/js/aes.js"></script>
+    <script type="text/javascript" src="/baf/js/config.js"></script>
+<link rel="stylesheet" type="text/css" href="/bootstrap/css/bootstrap.css"/>
+    <script type="text/javascript">
+        //<![CDATA[
+      
+        //]]>
+    </script>
+    <!--<script src="https://cdn.bootcss.com/jsencrypt/3.0.0-beta.1/jsencrypt.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsencrypt/2.3.1/jsencrypt.min.js" async></script>-->
+    <script type="text/javascript" src="/baf/js/jsencrypt.min.js" async></script>
+</head>
+<body>
+<div class="layer-shadow">
+    <div class="layer">
+        <div style="height: 1px"></div>
+        <div class="h1">密码修改</div>
+        <div class="layer-display"></div>
+        <div class="layer-input">
+            <input style="width: 100%" id="email" name="email" type="email" placeholder="邮箱"></input>
+        </div>
+        <input name="realmail" type="hidden" value=""/>
+        <div class="layer-botton">
+            <input class="btn btn-info active" style="margin-left: 65px;width: 80px" type="button" onclick="javascript:layer_enter();" value="确定"/>
+            <input class="btn btn-info active" style="margin-left: 65px;width: 80px" type="button" onclick="javascript:layer_cacle();" value="取消"/>
+        </div>
+    </div>
+</div>
+<!-- 头部 -->
+<div class="w">
+	<!-- Logo信息 -->
+  <div id="logo">
+  <a href="#">
+	<img alt="铁塔"  src="/baf/css/login_itower/logo-201305-b.png" width="160" height="60" />
+	</a>
+	<span style="font-size:28px;vertical-align: middle;height:60px;line-height:60px;">运维监控系统</span>
+</div>
+
+</div>
+<!-- 正文 -->
+     <div id="content">
+            <div class="login-wrap">
+                <div class="w">
+                    <div class="login-form">
+                        <div class="login-box">
+                            <div>
+                                <h1 style="text-align: center;color: blue;font-size:25px;">公告</h1>
+                            </div>
+                            <div class="msg-wrap">
+
+                                <div id="msgWrap" class="msg-error hide"></div>
+                            </div>
+                            <div class="mc">
+                                <div class="form">
+                                    <form id="loginForm" style="height: 200px">
+                                        <div style="text-align: left;">
+                                            <div style="font-family:'Microsoft YaHei',微软雅黑 ;color: blue;font-size:16px;line-height:35px">
+                                                该登录地址已关闭，请通过如下方式访问运监系统：
+                                            </div>
+                                            <div style="font-family:'Microsoft YaHei',微软雅黑 ;color: blue;font-size:16px;line-height:35px">
+                                                自有人员：通过OA登陆，运维监控系统、FSU监控系统
+                                            </div>
+                                            <div style="font-family:'Microsoft YaHei',微软雅黑 ;color: blue;font-size:16px;line-height:35px">
+                                                非自有人员：
+                                                <a class="a_hrefurl" href="http://4a.chinatowercom.cn:20000/uac/index" rel="noreferrer" target="_blank" >http://4a.chinatowercom.cn:20000/uac/index</a>
+                                            </div>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="login-banner">
+                    <div class="w">
+                        <div id="banner-bg" class="i-inner"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+<div class=w style="text-align: center;">
+
+    <div class=copyright style="font-family:'Microsoft YaHei',微软雅黑 ;color: #333333;">为了提高系统的使用性能，请尽量使用谷歌浏览器。
+        <span>若使用IE浏览器，请设置成“<a href=# onclick="showWin();" >兼容模式</a>”。</span>
+    </div>
+    <div style="margin-top: 70px;font-family:'Microsoft YaHei',微软雅黑 ;color: #333333;">
+        中国铁塔股份有限公司 版权所有 <a class="a_href" href="http://www.beian.miit.gov.cn/state/outPortal/loginPortal.action" rel="noreferrer" target="_blank" >京ICP备14039488号</a>
+    </div>
+
+</div>
+
+<script type=text/javascript>
+function showWin(){
+	
+	window.open ('/baf/jsp/uiframe/setIE.jsp','newwindow','height=540,width=1140,toolbar=no,menubar=no,scrollbars=no,resizable=no,location=no,status=no') 
+	
+}
+
+function clearAllCookie() {
+    var keys = document.cookie.match(/[^ =;]+(?=\=)/g);
+    if(keys) {
+        for(var i = keys.length; i--;)
+            document.cookie = [REDACTED] + '=0;expires=' + new Date(0).toUTCString()
+    }
+}
+
+~function() {
+    var data = [{
+        src: "/baf/css/login_itower/banner01.png",
+        bgColor: "#e5ddc1",
+        weight: "4"
+    }, {
+    	src:"/baf/css/login_itower/banner02.png",
+    	bgColor:"#ffe7ac",
+    	weight: "4"
+    }];
+    var getRandom = function(arr) {
+            var _temp = 0,
+                _random = 0,
+                _weight, _newArr = [];
+            for (var i = 0; i < arr.length; i++) {
+                _weight = arr[i].weight ? parseInt(arr[i].weight) : 1;
+                _newArr[i] = [];
+                _newArr[i].push(_temp);
+                _temp += _weight;
+                _newArr[i].push(_temp);
+            }
+            _random = Math.ceil(_temp * Math.random());
+            for (var i = 0; i < _newArr.length; i++) {
+                if (_random > _newArr[i][0] && _random <= _newArr[i][1]) {
+                    return arr[i];
+                }
+            }
+        };
+    var tpl = '<div class="login-banner" style="background-color: {bgColor}">\		              <div class="w">\			         <div id="banner-bg"  clstag="pageclick|keycount|20150112ABD|46" class="i-inner" style="background: url({imgURI}) 0px 0px no-repeat;background-color: {bgColor}"></div>\		              </div>\		           </div>';
+    var bgData = getRandom(data);
+    var bannerHtml = tpl.replace(/{bgColor}/g, bgData.bgColor).replace(/{imgURI}/g, bgData.src);
+    $('.login-banner').replaceWith(bannerHtml);
+}();
+</script>
+<script type=text/javascript>
+ var  akey= "";
+ var  publicKey = "";
+ $(document).ready(function(){
+	 $(document).ready(function(){
+            var ispro;
+            var url="/jf/login/isSSO";
+            $.ajax({
+                url: url,
+                async:false,
+                dataType: "json",
+                type: "POST",
+                success: function(obj){
+                    ispro=obj.isSSO;
+                    akey = obj.akey;
+                    publicKey = obj.publicKey;
+                    if(ispro=="Y"){
+                        var url = "http://"+window.location.host;
+                        window.location.href=url+"/layout/index.xhtml";
+                    }
+                },
+                error: function(){
+                    alert("网络错误，请重试");
+                }
+            });
+
+        });
+     // 请求CSRF令牌
+     $.ajax({
+       url: "/jf/login/getCSRFToken",
+       type: "GET",
+       success: function(response){
+         $("#csrfToken"[REDACTED];
+       }
+     });
+	 $("#loginForm").submit(function(){
+	     alert(11);
+		 login();
+		 return false;
+	 });
+ });
+ function encrypt(word){
+     var  ak = akey+'@$'+APPENDS;
+     var key = CryptoJS.enc.Utf8.parse(ak);
+     var srcs = CryptoJS.enc.Utf8.parse(word);
+     var encrypted = CryptoJS.AES.encrypt(srcs, key, {mode:CryptoJS.mode.ECB,padding: CryptoJS.pad.Pkcs7});
+     return encrypted.toString();
+ }
+
+ function login(){
+	 var loginName = $("#loginName").val();
+	 var password = [REDACTED]"#password"[REDACTED];
+	 var verifycode = $("#verifycode").val();
+	 
+	 if(loginName=[REDACTED]""){
+		 showError("用户名不能为空！");
+		 return;
+	 }
+	 if(password==""[REDACTED]
+		 showError("密码不能为空！");
+		 return;
+	 }
+	 //加密
+	//var key = 'tissonco';//加密key
+	//password = [REDACTED];
+
+     //使用公钥加密
+     let RSAEncrypt = new JSEncrypt();
+     RSAEncrypt.setPublicKey(publicKey);
+     let encryptedPass = RSAEncrypt.encrypt(password);
+     password = [REDACTED];
+	
+ 	 var data = $("#loginForm").serialize(); //data = {loginName: "sa", password: "[REDACTED]", picCode: "7735"}
+ 	 data = serialize2json(data);
+ 	 data.password = [REDACTED];
+
+	
+	 var url = "/jf/login/checkLogin";
+
+	 $.post(url,data,function(state){
+		var data=state.status;
+		var userid = state.userid;
+		var status = {
+			"-2" : "用户名或密码不正确！",
+			"-1" : "用户名或密码不正确！",
+			1  : "OK",
+			2  : "您的密码已到期，请修改密码！",
+			3  : "验证码输入错误！",
+			4  : "强制修改密码",
+			51 : "登录失败！系统要求绑定IP地址登录，请绑定IP地址！",
+			52 : "登录失败！您的登录IP与您绑定的IP不符！",
+			6  : "动态密码不正确，请点击获取!",
+			7  : "动态密码不正确，请重新输入!",
+			8  : "当前人员必须通过统一认证系统登录！",
+			9  : "有多个部门需选择一个",
+			10 : "您已经被选为试运行发布测试用户，系统将自动跳转到试运行服务器，请重新输入密码登录!",
+			11 : "密码不能再错一次，否则被锁定!",
+			12 : "输入密码错误次数"+3+"次被锁!解锁请联系管理员！",
+			13 : "您登陆的IP地址已经被限制登陆，请联系管理员解除限制！",
+            14 : "登录账号的领导类型为空，无法登录，请联系管理员配置领导类型!"
+		};
+		var msg = "";
+		var action = "";
+		
+		if(status[data]){
+			if(data == 1){
+				//action = "/baf/jsp/uiframe/frame.xhtml";
+				//action = "/layout/frame.xhtml";
+				action = "/layout/index.xhtml";
+			}
+			else if(data==4){
+				action = "/baf/jsp/uiframe/changePassword.jsp";
+			}
+			else
+				msg = status[data];
+		}else{
+			if(data.indexOf("#")!= -1){
+				var state = data.split("#")[0];
+				var message = data.split("#")[1];
+				if(state == 5){
+					if(!message)
+						msg = status[51];
+					else
+						msg = status[52];
+				}
+				if(state == 10){
+					msg = status[10];
+					action = "http://"+message;
+				}
+				if(state == 11 || state == 12)
+					msg = message;
+			}else{
+				alert("出现未知错误无法处理");
+				return false;
+			}
+		}
+		if(msg){
+			reloadVerifyCode();
+			showError(msg);
+			return;
+		}
+
+		if(action){
+			location.href=action;
+			return;
+		}
+	
+		return false;
+	});
+}
+	//刷新验证码
+	function reloadVerifyCode(){
+		var timenow = new Date().getTime();                        
+		$("#verifyimg").attr("src","/servlet/ValidateCodeServlet?d="+timenow);
+	}
+
+ 
+ //显示错误信息
+ function showError(msg){
+	 $("#msgWrap").html("<b></b>"+msg);
+	 $("#msgWrap").removeClass("hide");
+ }
+ 
+function serialize2json(serial){
+	serial = decodeURIComponent(serial);
+	var arr = serial.split("&");
+	var result = {};
+	for(var i = 0, row ; row = arr[i] ; i++){
+		var member = row.split("=");
+		result[member[0]] = member[1];
+	}
+	return result;
+}
+
+ function valid_email(str) {
+     str = str.replace('*', 'a');
+     var reg = /^(\w)+(\.\w+)*@(\w)+((\.\w+)+)$/;
+     return reg.test(str);
+ }
+ var currentUser;
+ function showlayer() {
+     //必须输入字符，切正确后，才能弹出该框
+     $("#email").attr("disabled", false);
+     var loginName = $('input[name="loginName"]').val().trim();
+     if (loginName == "") {
+         alert("请先输入账号"[REDACTED];
+         return;
+     }
+     var email = '';
+     var email_show = '';
+     var realname = '';
+     //1.1根据录入信息，从库中查询e-mail;
+     $.ajax({
+         type: "post",
+         url: '/locateInterface?operate=selectUserByloginName',
+         data: {loginName:loginName},
+         dataType: 'json',
+         success: function (json) {
+             if (json) {
+                 realname = "#" + json[0].username + "#";
+                 email = valid_email(json[0].email) ? json[0].email : '';
+                 email_show = json[0].mobilephone;
+                 $('input[name="email"]').val(email);
+                 $('input[name="realmail"]').val(email);
+                 currentUser = json[0];
+                 if(email!='' ){
+                     $("#email").attr("disabled", true);
+                 }
+             }
+         }
+     });
+     $('.layer-shadow').css('display', 'block');
+ }
+
+ function layer_cacle() {
+     $('.layer-shadow').css('display', 'none');
+ }
+
+ function layer_enter() {
+     debugger;
+     var tmp_read = document.getElementById("email").disabled;
+     if (tmp_read == false) {
+         var tmp_val = $('input[name="email"]').val();
+         $('input[name="realmail"]').val(tmp_val);
+     }
+     var rmail = $('input[name="realmail"]').val();
+     //2.1判断是否为email
+     //2.2如果是，发送
+     var retmes = '';
+     if (rmail) {
+         if (valid_email(rmail)) {
+             //调用发送
+             var data = new Object();
+             data.id = $('input[name="loginName"]').val().trim();
+             data.name = currentUser ? currentUser.username : "";
+             data.email = rmail;
+
+             var postdata = JSON.stringify(data);
+             var coderet;
+             $.ajax({
+                 type: "post",
+                 url: '/forgotpassword',
+                 data: postdata,
+                 dataType: 'text',
+                 async: true,
+                 success: function (json) {
+                     retmes = json;
+                     alert(retmes);
+                 }
+             });
+         } else {
+             retmes = '请检查输入框中的邮箱是否正确:XXXX@xxxxx.xxx！';
+             alert(retmes);
+         }
+     } else {
+         alert("请输入一个邮箱地址！");
+         return;
+     }
+     $('.layer-shadow').css('display', 'none');
+ }
+ 
+ //DES加密
+function encryptByDES(message, key){
+    var keyHex = CryptoJS.enc.Utf8.parse(key);
+    var encrypted = CryptoJS.DES.encrypt(message, keyHex, {
+        mode: CryptoJS.mode.ECB,
+        padding: CryptoJS.pad.Pkcs7
+    });
+    return encrypted.ciphertext.toString();
+}
+//DES解密
+function decryptByDES(ciphertext, key){
+    var keyHex = CryptoJS.enc.Utf8.parse(key);
+    var decrypted = CryptoJS.DES.decrypt({
+        ciphertext: CryptoJS.enc.Hex.parse(ciphertext)
+    }, keyHex, {
+        mode: CryptoJS.mode.ECB,
+        padding: CryptoJS.pad.Pkcs7
+    });
+    var result_value = decrypted.toString(CryptoJS.enc.Utf8);
+    return result_value;
+}
+</script>
+</body>
+</Html>

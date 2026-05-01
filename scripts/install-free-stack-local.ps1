@@ -1,8 +1,9 @@
 $ErrorActionPreference = "Stop"
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$downloads = "C:\Users\Administrator\tools\downloads"
-$installRoot = "C:\Users\Administrator\tools\monitoring"
+$toolsDir = Join-Path $env:USERPROFILE "Tools"
+$downloads = Join-Path $toolsDir "downloads"
+$installRoot = Join-Path $toolsDir "monitoring"
 New-Item -ItemType Directory -Force -Path $downloads | Out-Null
 New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
 
@@ -26,7 +27,11 @@ $assets = @(
 
 Write-Host "[install] python dependencies..."
 Set-Location (Join-Path $root "backend")
-pip install prometheus-client paho-mqtt amqtt
+$pythonExe = Join-Path (Get-Location) ".venv\Scripts\python.exe"
+if (-not (Test-Path $pythonExe)) {
+  $pythonExe = "python"
+}
+& $pythonExe -m pip install prometheus-client paho-mqtt amqtt
 
 foreach ($asset in $assets) {
   $zipPath = Join-Path $downloads $asset.zip
@@ -41,6 +46,6 @@ foreach ($asset in $assets) {
 }
 
 Write-Host "[install] done"
-Write-Host "  Prometheus:  C:\\Users\\Administrator\\tools\\monitoring\\prometheus-2.54.1.windows-amd64"
-Write-Host "  Alertmanager: C:\\Users\\Administrator\\tools\\monitoring\\alertmanager-0.27.0.windows-amd64"
-Write-Host "  Grafana:     C:\\Users\\Administrator\\tools\\monitoring\\grafana-v11.1.4"
+Write-Host ("  Prometheus:   {0}" -f (Join-Path $installRoot "prometheus-2.54.1.windows-amd64"))
+Write-Host ("  Alertmanager: {0}" -f (Join-Path $installRoot "alertmanager-0.27.0.windows-amd64"))
+Write-Host ("  Grafana:      {0}" -f (Join-Path $installRoot "grafana-v11.1.4"))

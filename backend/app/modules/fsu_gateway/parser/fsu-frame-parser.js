@@ -67,6 +67,47 @@ function readUInt16(buf, offset, endian) {
   return endian === "le" ? buf.readUInt16LE(offset) : buf.readUInt16BE(offset);
 }
 
+function readByte(buf, offset) {
+  return offset >= 0 && offset < buf.length ? buf[offset] : null;
+}
+
+function computeFsuChecksum(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 2) {
+    return null;
+  }
+  const copy = Buffer.from(buffer);
+  if (copy.length > CHECKSUM_OFFSET + 1) {
+    copy[CHECKSUM_OFFSET] = 0;
+    copy[CHECKSUM_OFFSET + 1] = 0;
+  }
+  let sum = 0;
+  for (let i = 2; i < copy.length; i += 1) {
+    sum = (sum + copy[i]) & 0xffff;
+  }
+  return sum;
+}
+
+function checksumInfo(buf) {
+  const checksumStoredLE = readUInt16(buf, CHECKSUM_OFFSET, "le");
+  const checksumStoredBE = readUInt16(buf, CHECKSUM_OFFSET, "be");
+  const checksumCalculated = computeFsuChecksum(buf);
+  const checksumValidLE = checksumStoredLE !== null && checksumCalculated !== null && checksumStoredLE === checksumCalculated;
+  const checksumValidBE = checksumStoredBE !== null && checksumCalculated !== null && checksumStoredBE === checksumCalculated;
+  return {
+    checksumStored: checksumStoredLE,
+    checksumStoredHex: hexSlice(buf, CHECKSUM_OFFSET, CHECKSUM_OFFSET + 2),
+    checksumStoredLE,
+    checksumStoredBE,
+    checksumCalculated,
+    checksumCalculatedLE: checksumCalculated,
+    checksumCalculatedBE: checksumCalculated,
+    checksumValidLE,
+    checksumValidBE,
+    checksumValid: checksumValidLE || checksumValidBE,
+    checksumEndianGuess: checksumValidLE ? "LE" : checksumValidBE ? "BE" : "unknown",
+  };
+}
+
 function classifyFrame({ protocol, totalLength, typeA }) {
   if (protocol === "UDP_DSC" && totalLength === 24 && typeA === "1f00d2ff") {
     return "DSC_SHORT_24_TYPE_1F00_D2FF";
@@ -385,13 +426,19 @@ function parseFsuFrame(input, options = {}) {
   const totalLength = buf.length;
   const headerHex = hexSlice(buf, 0, 2);
   const typeA = hexSlice(buf, 4, 8);
+  const headerByte4 = readByte(buf, 4);
+  const headerByte5 = readByte(buf, 5);
+  const headerByte6 = readByte(buf, 6);
+  const headerByte7 = readByte(buf, 7);
   const payloadLengthCandidate = readUInt16(buf, 20, "le");
+  const payloadLengthBE = readUInt16(buf, 20, "be");
   const body = totalLength > BODY_OFFSET ? buf.subarray(BODY_OFFSET) : Buffer.alloc(0);
   const asciiSpans = options.includeAscii === false ? undefined : scanAsciiSpans(buf);
   const uris = asciiSpans ? extractUris(asciiSpans) : [];
   const ipAddresses = asciiSpans ? extractIpAddresses(asciiSpans) : [];
   const ports = extractPorts(uris);
   const frameClass = classifyFrame({ protocol, totalLength, typeA });
+  const checksum = checksumInfo(buf);
 
   const parsed = {
     ok: inputResult.ok,
@@ -399,15 +446,50 @@ function parseFsuFrame(input, options = {}) {
     frameClass,
     totalLength,
     headerHex,
+    magicHex: headerHex,
     validHeader: headerHex === EXPECTED_HEADER_HEX,
     seqLE: readUInt16(buf, 2, "le"),
     seqBE: readUInt16(buf, 2, "be"),
     typeA,
+    typeBytesSummary: typeA,
+    headerByte4,
+    headerByte5,
+    headerByte6,
+    headerByte7,
+    typeByte: headerByte4,
+    flagByte: headerByte5,
+    classByte: headerByte6,
+    tailByte: headerByte7,
+    ackRequiredFlag: headerByte5 !== null ? (headerByte5 & 0x80) !== 0 : null,
+    typeBytes: {
+      headerByte4,
+      headerByte5,
+      headerByte6,
+      headerByte7,
+      typeByte: headerByte4,
+      flagByte: headerByte5,
+      classByte: headerByte6,
+      tailByte: headerByte7,
+      ackRequiredFlag: headerByte5 !== null ? (headerByte5 & 0x80) !== 0 : null,
+    },
     payloadLengthCandidate,
+    payloadLengthLE: payloadLengthCandidate,
+    payloadLengthBE,
     payloadLengthMatchesTotalMinus24:
       payloadLengthCandidate !== null ? payloadLengthCandidate === totalLength - 24 : false,
     checksumOffset: CHECKSUM_OFFSET,
     checksumLE: readUInt16(buf, CHECKSUM_OFFSET, "le"),
+    checksumStored: checksum.checksumStored,
+    checksumStoredHex: checksum.checksumStoredHex,
+    checksumStoredLE: checksum.checksumStoredLE,
+    checksumStoredBE: checksum.checksumStoredBE,
+    checksumCalculated: checksum.checksumCalculated,
+    checksumCalculatedLE: checksum.checksumCalculatedLE,
+    checksumCalculatedBE: checksum.checksumCalculatedBE,
+    checksumValidLE: checksum.checksumValidLE,
+    checksumValidBE: checksum.checksumValidBE,
+    checksumValid: checksum.checksumValid,
+    checksumEndianGuess: checksum.checksumEndianGuess,
     bodyOffset: BODY_OFFSET,
     bodyLength: body.length,
     bodyHex: options.includePayloadHex ? body.toString("hex") : undefined,
@@ -444,6 +526,7 @@ module.exports = {
   KNOWN_MEANINGS,
   TYPE_A_ANNOTATIONS,
   cleanHex,
+  computeFsuChecksum,
   getFrameClassAnnotation,
   getTypeAAnnotation,
   parseDscConfigPayload,

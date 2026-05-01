@@ -1,0 +1,47 @@
+{
+  "labels": [],
+  "tableHeaders": [],
+  "buttonTextsOnly": [],
+  "inputs": [
+    {
+      "sourceFile": "homepage.html",
+      "pageTitle": "铁塔-欢迎登录",
+      "tag": "input",
+      "name": "email",
+      "id": "email",
+      "placeholder": "邮箱",
+      "value": "",
+      "readonly": false
+    },
+    {
+      "sourceFile": "homepage.html",
+      "pageTitle": "铁塔-欢迎登录",
+      "tag": "input",
+      "name": "realmail",
+      "id": "",
+      "placeholder": "",
+      "value": "",
+      "readonly": false
+    },
+    {
+      "sourceFile": "homepage.html",
+      "pageTitle": "铁塔-欢迎登录",
+      "tag": "input",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "value": "确定",
+      "readonly": false
+    },
+    {
+      "sourceFile": "homepage.html",
+      "pageTitle": "铁塔-欢迎登录",
+      "tag": "input",
+      "name": "",
+      "id": "",
+      "placeholder": "",
+      "value": "取消",
+      "readonly": false
+    }
+  ]
+}

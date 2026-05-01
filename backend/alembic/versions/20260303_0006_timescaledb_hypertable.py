@@ -8,6 +8,7 @@ Create Date: 2026-03-03 19:20:00
 from typing import Sequence, Union
 
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "20260303_0006"
@@ -19,6 +20,12 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
+        return
+
+    timescaledb_available = bind.scalar(
+        sa.text("SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb')")
+    )
+    if not timescaledb_available:
         return
 
     op.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")

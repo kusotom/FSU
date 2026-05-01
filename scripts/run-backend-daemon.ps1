@@ -6,10 +6,13 @@ $backendDir = Join-Path $projectRoot "backend"
 $logDir = Join-Path $projectRoot "runtime-logs"
 $outLog = Join-Path $logDir "backend-daemon.out.log"
 $errLog = Join-Path $logDir "backend-daemon.err.log"
-$pyExe = "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\python.exe"
+$pyExe = Join-Path $backendDir ".venv\Scripts\python.exe"
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
+if (-not (Test-Path $pyExe)) {
+  $pyExe = Join-Path $env:LOCALAPPDATA "Programs\Python\Python311\python.exe"
+}
 if (-not (Test-Path $pyExe)) {
   $pyExe = "python"
 }
@@ -19,6 +22,13 @@ Set-Location $backendDir
 if (-not (Test-Path ".env")) {
   Copy-Item ".env.example" ".env"
 }
+
+$pgStart = Join-Path $scriptDir "start-postgres-local.ps1"
+if (Test-Path $pgStart) {
+  & $pgStart
+}
+
+$env:TIMESCALEDB_AUTO_ENABLE = "false"
 
 while ($true) {
   Add-Content -Path $outLog -Value ("[{0}] starting backend daemon" -f (Get-Date -Format s))

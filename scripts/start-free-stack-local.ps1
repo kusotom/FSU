@@ -11,9 +11,13 @@ $logDir = Join-Path $root "runtime-logs\local-stack"
 $dataDir = Join-Path $root "runtime-data\local-stack"
 $pidFile = Join-Path $logDir "pids.json"
 
-$promDir = "C:\Users\Administrator\tools\monitoring\prometheus-2.54.1.windows-amd64"
-$alertDir = "C:\Users\Administrator\tools\monitoring\alertmanager-0.27.0.windows-amd64"
-$grafanaDir = "C:\Users\Administrator\tools\monitoring\grafana-v11.1.4"
+$pythonExe = Join-Path $backendDir ".venv\Scripts\python.exe"
+$amqttExe = Join-Path $backendDir ".venv\Scripts\amqtt.exe"
+$npmCmd = "C:\Program Files\nodejs\npm.cmd"
+$toolsDir = Join-Path $env:USERPROFILE "Tools"
+$promDir = Join-Path $toolsDir "monitoring\prometheus-2.54.1.windows-amd64"
+$alertDir = Join-Path $toolsDir "monitoring\alertmanager-0.27.0.windows-amd64"
+$grafanaDir = Join-Path $toolsDir "monitoring\grafana-v11.1.4"
 
 $amqttConfig = Join-Path $root "deploy\local\amqtt\amqtt.yml"
 $promConfig = Join-Path $root "deploy\local\prometheus\prometheus.yml"
@@ -35,6 +39,9 @@ if (Test-Path $pidFile) {
 }
 
 foreach ($requiredPath in @(
+  $pythonExe,
+  $amqttExe,
+  $npmCmd,
   (Join-Path $promDir "prometheus.exe"),
   (Join-Path $alertDir "alertmanager.exe"),
   (Join-Path $grafanaDir "bin\grafana-server.exe"),
@@ -113,14 +120,14 @@ function Start-LoggedProcess {
   }
 }
 
-Write-Host "[local-stack] Ensuring PostgreSQL service is running..."
-Start-Service postgresql-x64-16 -ErrorAction SilentlyContinue
-Get-Service postgresql-x64-16 | Select-Object Name, Status | Format-Table | Out-Host
+Write-Host "[local-stack] Ensuring PostgreSQL is running..."
+& (Join-Path $PSScriptRoot "start-postgres-local.ps1")
 
-Write-Host "[local-stack] Running backend migrations..."
+Write-Host "[local-stack] Ensuring backend schema..."
 Push-Location $backendDir
 $env:DATABASE_URL = "postgresql+psycopg://fsu:fsu123456@127.0.0.1:5432/fsu"
-python -m alembic upgrade head
+$env:TIMESCALEDB_AUTO_ENABLE = "false"
+& $pythonExe -c "from app.db.base import Base; from app.db.session import engine; import app.models; Base.metadata.create_all(bind=engine)"
 Pop-Location
 
 $procs = @()
@@ -129,13 +136,14 @@ Write-Host "[local-stack] Starting backend..."
 $backendCmd = @"
 Set-Location '$backendDir'
 `$env:DATABASE_URL='postgresql+psycopg://fsu:fsu123456@127.0.0.1:5432/fsu'
-`$env:AUTO_CREATE_SCHEMA='false'
+`$env:AUTO_CREATE_SCHEMA='true'
 `$env:INGEST_MODE='queue'
 `$env:INGEST_QUEUE_WORKERS='2'
 `$env:INGEST_QUEUE_BATCH_SIZE='100'
 `$env:INGEST_QUEUE_BATCH_WAIT_MS='120'
 `$env:SYSTEM_RULE_EVAL_ENABLED='false'
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+`$env:TIMESCALEDB_AUTO_ENABLE='false'
+& '$pythonExe' -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 "@
 $procs += Start-LoggedProcess -Name "backend" -Command $backendCmd
 Wait-HttpReady -Name "backend" -Url "http://127.0.0.1:8000/health" -TimeoutSec 120
@@ -143,7 +151,7 @@ Wait-HttpReady -Name "backend" -Url "http://127.0.0.1:8000/health" -TimeoutSec 1
 Write-Host "[local-stack] Starting amqtt broker..."
 $amqttCmd = @"
 Set-Location '$backendDir'
-amqtt -c '$amqttConfig'
+& '$amqttExe' -c '$amqttConfig'
 "@
 $procs += Start-LoggedProcess -Name "amqtt" -Command $amqttCmd
 Wait-PortReady -Name "mqtt" -Port 1883 -TimeoutSec 60
@@ -161,7 +169,7 @@ Set-Location '$backendDir'
 `$env:BRIDGE_QUEUE_MAXSIZE='50000'
 `$env:BRIDGE_WORKER_COUNT='4'
 `$env:BRIDGE_METRICS_PORT='9108'
-python .\scripts\mqtt_ingest_bridge.py
+& '$pythonExe' .\scripts\mqtt_ingest_bridge.py
 "@
 $procs += Start-LoggedProcess -Name "mqtt-bridge" -Command $bridgeCmd
 Wait-HttpReady -Name "bridge-mt" -Url "http://127.0.0.1:9108/" -TimeoutSec 60
@@ -203,7 +211,7 @@ if ($WithFrontend) {
   Write-Host "[local-stack] Starting frontend (vite dev)..."
   $frontCmd = @"
 Set-Location '$frontendDir'
-npm run dev -- --host 127.0.0.1 --port 5173
+& '$npmCmd' run dev -- --host 127.0.0.1 --port 5173
 "@
   $procs += Start-LoggedProcess -Name "frontend" -Command $frontCmd
   Wait-HttpReady -Name "frontend" -Url "http://127.0.0.1:5173/" -TimeoutSec 120

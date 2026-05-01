@@ -1,0 +1,132 @@
+[
+  {
+    "url": "http://omms.chinatowercom.cn:9000/baf/js/jquery-3.6.0.min.js",
+    "ok": true,
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-001.js",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  },
+  {
+    "url": "http://omms.chinatowercom.cn:9000/baf/js/jquery.form.js",
+    "ok": true,
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-002.js",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  },
+  {
+    "url": "http://omms.chinatowercom.cn:9000/js/tongji.js",
+    "ok": true,
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-003.js",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  },
+  {
+    "url": "http://omms.chinatowercom.cn:9000/bootstrap/js/bootstrap.js",
+    "ok": true,
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-004.js",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  },
+  {
+    "url": "http://omms.chinatowercom.cn:9000/baf/js/crypto-js/lib/crypto-js.js",
+    "ok": true,
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-005.js",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  },
+  {
+    "url": "http://omms.chinatowercom.cn:9000/baf/js/aes.js",
+    "ok": true,
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-006.js",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  },
+  {
+    "url": "http://omms.chinatowercom.cn:9000/baf/js/config.js",
+    "ok": true,
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-007.js",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  },
+  {
+    "url": "http://omms.chinatowercom.cn:9000/baf/js/jsencrypt.min.js",
+    "ok": true,
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-008.js",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  },
+  {
+    "url": "http://omms.chinatowercom.cn:9000/baf/css/login_itower/base.css",
+    "ok": true,
+    "status": 200,
+    "contentType": "text/css;charset=utf-8",
+    "savedAs": "resource-009.css",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  },
+  {
+    "url": "http://omms.chinatowercom.cn:9000/baf/css/login_itower/passport-2015.css",
+    "ok": true,
+    "status": 200,
+    "contentType": "text/css;charset=utf-8",
+    "savedAs": "resource-010.css",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  },
+  {
+    "url": "http://omms.chinatowercom.cn:9000/baf/images/iTower.ico",
+    "ok": true,
+    "status": 200,
+    "contentType": "",
+    "savedAs": "resource-011.ico",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  },
+  {
+    "url": "http://omms.chinatowercom.cn:9000/bootstrap/css/bootstrap.css",
+    "ok": true,
+    "status": 200,
+    "contentType": "text/css;charset=utf-8",
+    "savedAs": "resource-012.css",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  },
+  {
+    "url": "http://omms.chinatowercom.cn:9000/baf/css/login_itower/logo-201305-b.png",
+    "ok": true,
+    "status": 200,
+    "contentType": "image/png;charset=utf-8",
+    "savedAs": "resource-013.png",
+    "error": null,
+    "skipped": false,
+    "reason": ""
+  }
+]

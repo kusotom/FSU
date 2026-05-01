@@ -1,0 +1,79 @@
+[
+  {
+    "method": "GET",
+    "url": "http://omms.chinatowercom.cn:9000/baf/js/jquery-3.6.0.min.js",
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-001.js"
+  },
+  {
+    "method": "GET",
+    "url": "http://omms.chinatowercom.cn:9000/baf/js/jquery.form.js",
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-002.js"
+  },
+  {
+    "method": "GET",
+    "url": "http://omms.chinatowercom.cn:9000/js/tongji.js",
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-003.js"
+  },
+  {
+    "method": "GET",
+    "url": "http://omms.chinatowercom.cn:9000/bootstrap/js/bootstrap.js",
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-004.js"
+  },
+  {
+    "method": "GET",
+    "url": "http://omms.chinatowercom.cn:9000/baf/js/crypto-js/lib/crypto-js.js",
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-005.js"
+  },
+  {
+    "method": "GET",
+    "url": "http://omms.chinatowercom.cn:9000/baf/js/aes.js",
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-006.js"
+  },
+  {
+    "method": "GET",
+    "url": "http://omms.chinatowercom.cn:9000/baf/js/config.js",
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-007.js"
+  },
+  {
+    "method": "GET",
+    "url": "http://omms.chinatowercom.cn:9000/baf/js/jsencrypt.min.js",
+    "status": 200,
+    "contentType": "text/javascript;charset=utf-8",
+    "savedAs": "resource-008.js"
+  },
+  {
+    "method": "GET",
+    "url": "http://omms.chinatowercom.cn:9000/baf/css/login_itower/base.css",
+    "status": 200,
+    "contentType": "text/css;charset=utf-8",
+    "savedAs": "resource-009.css"
+  },
+  {
+    "method": "GET",
+    "url": "http://omms.chinatowercom.cn:9000/baf/css/login_itower/passport-2015.css",
+    "status": 200,
+    "contentType": "text/css;charset=utf-8",
+    "savedAs": "resource-010.css"
+  },
+  {
+    "method": "GET",
+    "url": "http://omms.chinatowercom.cn:9000/bootstrap/css/bootstrap.css",
+    "status": 200,
+    "contentType": "text/css;charset=utf-8",
+    "savedAs": "resource-012.css"
+  }
+]

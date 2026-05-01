@@ -9,6 +9,7 @@ const HistoryView = () => import("../views/HistoryView.vue");
 const UsersView = () => import("../views/UsersView.vue");
 const NotifyView = () => import("../views/NotifyView.vue");
 const AlarmRulesView = () => import("../views/AlarmRulesView.vue");
+const FsuDebugView = () => import("../views/FsuDebugView.vue");
 
 const getStoredUser = () => {
   const rawUser = localStorage.getItem("fsu_user");
@@ -34,6 +35,7 @@ const routes = [
   { path: "/sites-manage", component: SitesView, meta: { auth: true, permission: "site.view" } },
   { path: "/alarms", component: AlarmsView, meta: { auth: true, permission: "alarm.view" } },
   { path: "/history", component: HistoryView, meta: { auth: true, permission: "history.view" } },
+  { path: "/fsu-debug", component: FsuDebugView, meta: { auth: true, permission: "realtime.view" } },
   {
     path: "/alarm-rules",
     component: AlarmRulesView,

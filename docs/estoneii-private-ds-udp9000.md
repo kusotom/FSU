@@ -370,3 +370,27 @@ python backend\scripts\analyze_estoneii_gateway_events.py `
 守护进程巡检时不要只看 `running`，还要确认当前时间减 `updated_at` 小于 `stale_after_seconds`。如果外层会话强杀进程，最终 `running=false` 可能来不及写入，但 `updated_at` 会停止刷新。
 
 下一步落地点是把该 JSONL 事件流或守护进程内的事件处理器接入平台数据库，并继续解析实时数据、历史数据、告警、控制等业务帧。
+
+## 本地 FSUService 与 DS 主线关系
+
+`2026-04-27` 已验证设备本地 `http://192.168.100.100:8080/` 是 gSOAP `FSUService.invoke(xmlData)` 服务：
+
+- `GET_FSUINFO(Code=101)` 可成功返回 FSU 登录信息和 `DeviceList`。
+- `GET_DATA(Code=401)` 必须携带 `Info/DeviceList`，否则 WebProvider 记录 `[ParseXmlData]ERR` 并重启 8080。
+- `GET_DATA(Code=201)` 是错误命令。
+- 带 `DeviceList` 的 `GET_DATA` 可返回 `GET_DATA_ACK(Code=402, Result=1)`，但当前现场响应 `Values/DeviceList` 为空。
+
+因此当前落地主线仍是 DS/RDS 私有 UDP：
+
+- HTTP `FSUService` 保留为兼容探测和配置校验入口。
+- 正式在线状态、通信状态和后续实时/历史/告警业务帧继续由 `estoneii_ds_gateway.py` 长期监听。
+- 如后续在 `unknown_business_frame` 中发现承载 XML 或数据列表的业务帧，再补解析器并转入平台遥测入库。
+
+本地 SOAP 探测脚本：
+
+```powershell
+python backend\scripts\estoneii_fsu_soap_probe.py `
+  --url http://192.168.100.100:8080/ `
+  --fsu-code 51051243812345 `
+  --variants info-devices
+```

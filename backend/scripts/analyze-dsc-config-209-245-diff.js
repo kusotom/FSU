@@ -1,248 +1,147 @@
 #!/usr/bin/env node
-"use strict";
-
+/**
+ * Offline DSC_CONFIG 209/245 diff analyzer.
+ *
+ * SAFETY:
+ * - Does not open sockets.
+ * - Does not send UDP.
+ * - Reads local JSONL only.
+ */
 const fs = require("fs");
 const path = require("path");
-const { parseFsuFrame, BODY_OFFSET, CHECKSUM_OFFSET } = require("../app/modules/fsu_gateway/parser/fsu-frame-parser");
+const { parseFsuFrame, findHexCandidate } = require("../app/modules/fsu_gateway/parser/fsu-frame-v03-utils");
 
-const RAW_LOG_RE = /^\d{4}-\d{2}-\d{2}\.jsonl$/;
-const DEVICE_IP = "192.168.100.100";
-const RAW_DIR = path.join(__dirname, "..", "logs", "fsu_raw_packets");
-const CONFIG_CLASSES = new Set(["DSC_CONFIG_209_TYPE_1100_46FF", "DSC_CONFIG_245_TYPE_1100_46FF"]);
-const URI_RE = /\b(?:udp|ftp):\/\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+/g;
-
-function latestRawLog() {
-  const files = fs
-    .readdirSync(RAW_DIR)
-    .filter((name) => RAW_LOG_RE.test(name))
-    .sort();
-  if (!files.length) throw new Error(`No raw logs found in ${RAW_DIR}`);
-  return path.join(RAW_DIR, files[files.length - 1]);
+function findLatestRawLog() {
+  const dir = path.join(process.cwd(), "backend/logs/fsu_raw_packets");
+  if (!fs.existsSync(dir)) return null;
+  const files = fs.readdirSync(dir)
+    .filter(f => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f))
+    .map(f => path.join(dir, f))
+    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+  return files[0] || null;
 }
 
-function selectedLog() {
-  const arg = process.argv[2];
-  return arg ? path.resolve(arg) : latestRawLog();
+function parseArgs(argv) {
+  const args = {};
+  for (let i = 2; i < argv.length; i += 1) {
+    if (argv[i] === "--input" || argv[i] === "-i") args.input = argv[++i];
+    else if (argv[i] === "--out-date") args.outDate = argv[++i];
+    else if (argv[i] === "--device-ip") args.deviceIp = argv[++i];
+  }
+  return args;
 }
 
-function dateFromLog(logPath) {
-  const match = path.basename(logPath).match(/^(\d{4}-\d{2}-\d{2})\.jsonl$/);
-  return match ? match[1] : new Date().toISOString().slice(0, 10);
+function longestCommonPrefix(a, b) {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a[i] === b[i]) i += 1;
+  return i;
 }
 
-function readPackets(logPath) {
-  const out = [];
-  const lines = fs.readFileSync(logPath, "utf8").split(/\r?\n/);
-  lines.forEach((line, index) => {
-    if (!line.trim()) return;
-    let row;
-    try {
-      row = JSON.parse(line);
-    } catch {
-      return;
-    }
-    if (row.protocol !== "UDP_DSC" || row.remoteAddress !== DEVICE_IP) return;
-    if (row.remoteAddress === "127.0.0.1" || /hello fsu udp/i.test(row.rawText || "")) return;
-    const parsed = parseFsuFrame(row.rawHex, { protocol: row.protocol, includeAscii: true, includePayloadHex: true });
-    if (!CONFIG_CLASSES.has(parsed.frameClass)) return;
-    out.push({ row, parsed, sourceLine: index + 1, buf: Buffer.from(row.rawHex, "hex") });
-  });
-  return out;
-}
-
-function top(values, limit = 10) {
-  const map = new Map();
-  for (const value of values) map.set(value, (map.get(value) || 0) + 1);
-  return [...map.entries()]
-    .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
-    .slice(0, limit)
-    .map(([value, count]) => ({ value, count }));
-}
-
-function fieldVariation(items, maxLength) {
+function offsetDiff(a, b, limit = 256) {
+  const n = Math.min(Math.max(a.length, b.length), limit);
   const rows = [];
-  for (let offset = 0; offset < maxLength; offset += 1) {
-    const values = items.map((item) => (offset < item.buf.length ? item.buf[offset].toString(16).padStart(2, "0") : "(missing)"));
-    const distinct = [...new Set(values)];
-    rows.push({
-      offset,
-      offsetHex: `0x${offset.toString(16)}`,
-      fixed: distinct.length === 1,
-      fixedValue: distinct.length === 1 ? distinct[0] : null,
-      distinctCount: distinct.length,
-      topValues: top(values, 5),
+  for (let i = 0; i < n; i += 1) {
+    const av = i < a.length ? a[i] : null;
+    const bv = i < b.length ? b[i] : null;
+    if (av !== bv) rows.push({
+      offset: i,
+      a: av == null ? null : av.toString(16).padStart(2, "0"),
+      b: bv == null ? null : bv.toString(16).padStart(2, "0")
     });
   }
   return rows;
 }
 
-function asciiSummary(items) {
-  const uris = [];
-  const ipAddresses = [];
-  const ports = [];
-  const tokens = { dhcp: 0, root: 0, hello: 0, explicitIp: 0 };
-  for (const item of items) {
-    for (const uri of item.parsed.uris || []) uris.push(uri);
-    for (const ip of item.parsed.ipAddresses || []) {
-      ipAddresses.push(ip);
-      if (ip === DEVICE_IP) tokens.explicitIp += 1;
+function asciiSpans(buf) {
+  const out = [];
+  let start = null, s = "";
+  for (let i = 0; i < buf.length; i += 1) {
+    const c = buf[i];
+    if (c >= 0x20 && c <= 0x7e) {
+      if (start == null) start = i;
+      s += String.fromCharCode(c);
+    } else {
+      if (start != null && s.length >= 4) out.push({ offset: start, text: s });
+      start = null; s = "";
     }
-    for (const port of item.parsed.ports || []) ports.push(port);
-    const text = (item.parsed.asciiSpans || []).map((span) => span.text).join("\n");
-    tokens.dhcp += (text.match(/\[dhcp\]/g) || []).length;
-    tokens.root += (text.match(/root/g) || []).length;
-    tokens.hello += (text.match(/hello/g) || []).length;
   }
-  return {
-    uris: top(uris, 20),
-    ipAddresses: top(ipAddresses, 20),
-    ports: top(ports, 20),
-    tokens,
-  };
+  if (start != null && s.length >= 4) out.push({ offset: start, text: s });
+  return out;
 }
 
-function uriLengthExplanation() {
-  const pairs = [
-    ["udp://[dhcp]:6002", "udp://192.168.100.100:6002"],
-    ["udp://[dhcp]:6002", "udp://192.168.100.100:6002"],
-    ["udp://[dhcp]:6002", "udp://192.168.100.100:6002"],
-    ["ftp://root:hello@[dhcp]", "ftp://root:hello@192.168.100.100"],
-  ];
-  const rows = pairs.map(([dhcp, explicit], index) => ({
-    index,
-    dhcp,
-    explicit,
-    dhcpLength: dhcp.length,
-    explicitLength: explicit.length,
-    delta: explicit.length - dhcp.length,
-  }));
-  const totalDelta = rows.reduce((sum, row) => sum + row.delta, 0);
-  return {
-    rows,
-    totalDelta,
-    targetDelta: 245 - 209,
-    explainsLengthDelta: totalDelta === 245 - 209,
-    conclusion:
-      totalDelta === 245 - 209
-        ? "209/245 更像同结构不同 URI 表示形式：209 使用 [dhcp] 占位，245 使用显式 IP。"
-        : "URI 字符串长度差异尚不能完全解释 209/245 总长度差异。",
-  };
+const args = parseArgs(process.argv);
+const input = args.input || findLatestRawLog();
+if (!input || !fs.existsSync(input)) {
+  console.error("Input JSONL not found. Use --input backend/logs/fsu_raw_packets/YYYY-MM-DD.jsonl");
+  process.exit(2);
 }
+const outDate = args.outDate || path.basename(input, ".jsonl").match(/^\d{4}-\d{2}-\d{2}$/)?.[0] || new Date().toISOString().slice(0,10);
+const outDir = path.join(process.cwd(), "backend/logs/fsu_raw_packets");
+fs.mkdirSync(outDir, { recursive: true });
 
-function sampleInfo(item) {
-  return {
-    receivedAt: item.row.receivedAt,
-    remotePort: item.row.remotePort,
-    sourceLine: item.sourceLine,
-    headerHex: item.parsed.headerHex,
-    seqLE: item.parsed.seqLE,
-    seqBE: item.parsed.seqBE,
-    typeA: item.parsed.typeA,
-    payloadLengthCandidate: item.parsed.payloadLengthCandidate,
-    bodyLength: item.parsed.bodyLength,
-    checksumLE: item.parsed.checksumLE,
-    bodyOffset: item.parsed.bodyOffset,
-    checksumOffset: item.parsed.checksumOffset,
-    bodyHexPrefix: item.parsed.bodyHex ? item.parsed.bodyHex.slice(0, 160) : null,
-    uris: item.parsed.uris || [],
-  };
-}
+const frames209 = [];
+const frames245 = [];
+let total = 0;
 
-function ensureNewPath(basePath) {
-  if (!fs.existsSync(basePath)) return basePath;
-  const parsed = path.parse(basePath);
-  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
-  return path.join(parsed.dir, `${parsed.name}-${stamp}${parsed.ext}`);
-}
-
-function writeReports(result, dateStem) {
-  const jsonPath = ensureNewPath(path.join(RAW_DIR, `dsc-config-209-245-diff-${dateStem}.json`));
-  const mdPath = ensureNewPath(path.join(RAW_DIR, `dsc-config-209-245-diff-${dateStem}.md`));
-  fs.writeFileSync(jsonPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
-  const lines = [
-    "# DSC_CONFIG 209/245 Difference Analysis",
-    "",
-    "Read-only report. No UDP packets were sent, no ACK was generated, no realtime gateway reply logic was changed, and no business tables were written.",
-    "",
-    `Raw log: ${result.rawLog}`,
-    `Generated at: ${result.generatedAt}`,
-    "",
-    "## Counts",
-    "",
-    `- 209 count: ${result.counts.DSC_CONFIG_209_TYPE_1100_46FF}`,
-    `- 245 count: ${result.counts.DSC_CONFIG_245_TYPE_1100_46FF}`,
-    "",
-    "## URI Length Delta Check",
-    "",
-    `- Total URI delta: ${result.uriLengthExplanation.totalDelta}`,
-    `- Target frame delta: ${result.uriLengthExplanation.targetDelta}`,
-    `- Explains length delta: ${result.uriLengthExplanation.explainsLengthDelta}`,
-    `- Conclusion: ${result.uriLengthExplanation.conclusion}`,
-    "",
-    "## Preliminary Judgement",
-    "",
-    `- 209 DHCP placeholder config: ${result.preliminaryJudgement.dsc209DhcpPlaceholderConfig}`,
-    `- 245 explicit IP config: ${result.preliminaryJudgement.dsc245ExplicitIpConfig}`,
-    `- Same register/config retry stage: ${result.preliminaryJudgement.sameRegisterConfigRetryStage}`,
-    `- Business data frame: ${result.preliminaryJudgement.businessDataFrame}`,
-    "",
-  ];
-  fs.writeFileSync(mdPath, `${lines.join("\n")}\n`, "utf8");
-  return { jsonPath, mdPath };
-}
-
-function main() {
-  const logPath = selectedLog();
-  const dateStem = dateFromLog(logPath);
-  const packets = readPackets(logPath);
-  const byClass = {
-    DSC_CONFIG_209_TYPE_1100_46FF: packets.filter((item) => item.parsed.frameClass === "DSC_CONFIG_209_TYPE_1100_46FF"),
-    DSC_CONFIG_245_TYPE_1100_46FF: packets.filter((item) => item.parsed.frameClass === "DSC_CONFIG_245_TYPE_1100_46FF"),
-  };
-  const result = {
-    generatedAt: new Date().toISOString(),
-    rawLog: logPath,
-    safety: {
-      udpSent: false,
-      ackAdded: false,
-      realtimeGatewayReplyLogicChanged: false,
-      businessTablesWritten: false,
-      rawLogDeleted: false,
-    },
-    filters: {
-      protocol: "UDP_DSC",
-      remoteAddress: DEVICE_IP,
-      frameClasses: [...CONFIG_CLASSES],
-    },
-    counts: Object.fromEntries(Object.entries(byClass).map(([key, value]) => [key, value.length])),
-    samples: Object.fromEntries(Object.entries(byClass).map(([key, value]) => [key, value.slice(-3).map(sampleInfo)])),
-    asciiUriIpPort: Object.fromEntries(Object.entries(byClass).map(([key, value]) => [key, asciiSummary(value)])),
-    variation: Object.fromEntries(
-      Object.entries(byClass).map(([key, value]) => [key, fieldVariation(value, key.includes("209") ? 209 : 245)])
-    ),
-    uriLengthExplanation: uriLengthExplanation(),
-    preliminaryJudgement: {
-      dsc209DhcpPlaceholderConfig: byClass.DSC_CONFIG_209_TYPE_1100_46FF.length > 0,
-      dsc245ExplicitIpConfig: byClass.DSC_CONFIG_245_TYPE_1100_46FF.length > 0,
-      sameRegisterConfigRetryStage: byClass.DSC_CONFIG_209_TYPE_1100_46FF.length > 0 && byClass.DSC_CONFIG_245_TYPE_1100_46FF.length > 0,
-      businessDataFrame: false,
-      notes: [
-        "两类帧同属 UDP_DSC 且 typeA=110046ff。",
-        "245-209 的 36 字节差异可由 3 个 udp URI 和 1 个 ftp URI 从 [dhcp] 变为 192.168.100.100 的字符串长度差异解释。",
-        "不默认假设 245 多出尾部字段。",
-        "当前仍不判定为业务数据帧。",
-      ],
-    },
-  };
-  result.reportPaths = writeReports(result, dateStem);
-  console.log(JSON.stringify(result, null, 2));
-}
-
-if (require.main === module) {
-  try {
-    main();
-  } catch (error) {
-    console.error(error.stack || error.message);
-    process.exit(1);
+for (const line of fs.readFileSync(input, "utf8").split(/\r?\n/)) {
+  if (!line.trim()) continue;
+  let entry; try { entry = JSON.parse(line); } catch { continue; }
+  if (args.deviceIp) {
+    const s = JSON.stringify(entry);
+    if (!s.includes(args.deviceIp)) continue;
   }
+  const hex = findHexCandidate(entry);
+  if (!hex) continue;
+  const p = parseFsuFrame(hex);
+  if (!p.ok) continue;
+  if (p.typeBytesSummary.toLowerCase() === "110046ff" && p.totalLength === 209) frames209.push({ parsed: p, hex });
+  if (p.typeBytesSummary.toLowerCase() === "110046ff" && p.totalLength === 245) frames245.push({ parsed: p, hex });
+  total += 1;
 }
+
+const a = frames209[0]?.parsed ? Buffer.from(frames209[0].hex, "hex").slice(24) : Buffer.alloc(0);
+const b = frames245[0]?.parsed ? Buffer.from(frames245[0].hex, "hex").slice(24) : Buffer.alloc(0);
+const lcp = a.length && b.length ? longestCommonPrefix(a, b) : 0;
+const extra245 = b.length > a.length ? b.slice(a.length) : Buffer.alloc(0);
+
+const result = {
+  input,
+  generatedAt: new Date().toISOString(),
+  safety: { udpSent: false, socketOpened: false },
+  counts: { allParsed: total, dscConfig209: frames209.length, dscConfig245: frames245.length },
+  sample209: frames209[0]?.parsed || null,
+  sample245: frames245[0]?.parsed || null,
+  bodyComparison: {
+    body209Length: a.length,
+    body245Length: b.length,
+    longestCommonPrefixBytes: lcp,
+    extra245LengthIfBasePlusExt: extra245.length,
+    extra245HexIfBasePlusExt: extra245.toString("hex"),
+    firstDiffs: offsetDiff(a, b, 120),
+    ascii209: asciiSpans(a).slice(0, 50),
+    ascii245: asciiSpans(b).slice(0, 50),
+    asciiExtra245: asciiSpans(extra245)
+  }
+};
+
+const jsonPath = path.join(outDir, `dsc-config-209-245-diff-${outDate}.json`);
+fs.writeFileSync(jsonPath, JSON.stringify(result, null, 2));
+
+let md = `# DSC CONFIG 209/245 diff ${outDate}\n\n`;
+md += `Input: \`${input}\`\n\nSafety: offline only; no UDP sent.\n\n`;
+md += `Parsed packets: ${total}\n\n209 frames: ${frames209.length}\n\n245 frames: ${frames245.length}\n\n`;
+md += `Body 209 length: ${a.length}\n\nBody 245 length: ${b.length}\n\n`;
+md += `Longest common prefix: ${lcp} bytes\n\n`;
+md += `Extra 245 bytes if 245 = 209 + extension: ${extra245.length}\n\n`;
+md += `Extra 245 hex:\n\n\`\`\`text\n${extra245.toString("hex") || "(none)"}\n\`\`\`\n\n`;
+md += `## First body diffs\n\n| offset | 209 | 245 |\n|---:|---|---|\n`;
+for (const d of result.bodyComparison.firstDiffs.slice(0, 120)) {
+  md += `| ${d.offset} | ${d.a ?? ""} | ${d.b ?? ""} |\n`;
+}
+md += `\n## ASCII spans 209\n\n\`\`\`json\n${JSON.stringify(result.bodyComparison.ascii209, null, 2)}\n\`\`\`\n\n`;
+md += `## ASCII spans 245\n\n\`\`\`json\n${JSON.stringify(result.bodyComparison.ascii245, null, 2)}\n\`\`\`\n\n`;
+const mdPath = path.join(outDir, `dsc-config-209-245-diff-${outDate}.md`);
+fs.writeFileSync(mdPath, md);
+console.log(`Wrote ${mdPath}`);
+console.log(`Wrote ${jsonPath}`);

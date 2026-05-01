@@ -7,6 +7,7 @@
       <router-link v-if="auth.hasPermission('site.view')" class="nav-link" to="/sites-manage">站点管理</router-link>
       <router-link v-if="auth.hasPermission('alarm.view')" class="nav-link" to="/alarms">告警中心</router-link>
       <router-link v-if="auth.hasPermission('history.view')" class="nav-link" to="/history">历史查询</router-link>
+      <router-link v-if="auth.hasPermission('realtime.view')" class="nav-link" to="/fsu-debug">FSU调试</router-link>
       <router-link
         v-if="auth.hasAnyPermission(['alarm_rule.template.view', 'alarm_rule.tenant.view'])"
         class="nav-link"
