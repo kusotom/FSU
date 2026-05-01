@@ -82,6 +82,9 @@ fsu-platform/
 - `docs/estoneii-private-ds-udp9000.md`：eStoneII `SiteUnit` 在 SOAP B 接口前的 DS UDP/9000 私有握手解析。
 - `docs/fsu-2808im-protocol-notes.md`：FSU-2808IM raw packet 逆向分析笔记，记录已识别帧、候选字段和实验结论；候选 ACK 尚未确认为线上协议。
 - `docs/fsu-2808im-next-steps.md`：FSU-2808IM 后续只读观察、日志分析、告警识别和面板展示计划。
+- `docs/fsu-2808im-stage-summary-2026-04-30.md`：FSU-2808IM 当前阶段封存，汇总协议结构、实验记录、未确认项和平台只读能力。
+- `docs/fsu-2808im-safe-operation-notes.md`：FSU-2808IM 安全操作说明，明确线上 ACK、自动回包、业务入库和实验脚本边界。
+- `docs/fsu-readonly-observation-scheduler.md`：FSU 只读观测巡检定时任务说明，记录安装、手动运行、查询、卸载和输出报告位置。
 - `backend/app/integrations/unisms/README.md`：UniSMS 供应商适配层说明。
 - `backend/.env.unisms.example`：UniSMS 实发模式环境变量模板。
 
@@ -214,13 +217,49 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-frontend.ps1
 
 ### 7.0 FSU-2808IM 只读调试
 
-- `GET /fsu-debug/raw-packets`：只读读取 `backend/logs/fsu_raw_packets/YYYY-MM-DD.jsonl`，汇总 frameClass、remotePort、typeA、length、seqLE、URI、UNKNOWN 和新类型统计，并返回最近原始包用于排查。
-- 前端页面：`/fsu-debug`，在“FSU调试”入口查看 raw packet 逆向解析结果并复制 `rawHex`。
+- `GET /fsu-debug/raw-packets`：只读读取 `backend/logs/fsu_raw_packets/YYYY-MM-DD.jsonl`、readonly parse 输出和日报摘要，汇总 frameClass、remotePort、typeA、length、seqLE、URI、UNKNOWN、新类型、设备在线状态和诊断建议。
+- 前端页面：`/fsu-debug`，在“FSU调试”入口查看 FSU 接入诊断页，支持最近 100 条 raw packet、UNKNOWN 样本、DSC_CONFIG 样本和最近日报导出。
+- 日报脚本：`backend/scripts/generate-fsu-daily-observation-report.js`，按日期生成 `backend/logs/fsu_raw_packets/daily-observation-YYYY-MM-DD.md/json`。
+- 自动巡检脚本：`backend/scripts/run-fsu-readonly-observation.js`，封装健康检查、UDP 监听检查、raw log 增长检查、日报生成、新帧检测、当前状态机推断和注释 v0.2 报告生成。
+- Windows 定时任务入口：`backend/scripts/run-fsu-readonly-observation-task.ps1`，当前任务名为 `FSU Readonly Observation`，默认每 30 分钟运行一次。
 
 安全边界：
 - 该调试面板只读取 raw packet 日志，不发送 UDP 包。
 - 不启用自动 ACK，不修改 `fsu-gateway` 回包逻辑，不写业务主表。
 - 页面明确标注：当前协议解析为逆向分析结果，候选 ACK 未确认，线上回包未启用。
+
+只读巡检定时任务：
+
+```powershell
+# 安装或更新任务
+powershell -ExecutionPolicy Bypass -File backend\scripts\install-fsu-readonly-observation-task.ps1
+
+# 手动触发一次
+schtasks /Run /TN "FSU Readonly Observation"
+
+# 查询任务
+schtasks /Query /TN "FSU Readonly Observation" /V /FO LIST
+
+# 卸载任务
+powershell -ExecutionPolicy Bypass -File backend\scripts\uninstall-fsu-readonly-observation-task.ps1
+```
+
+巡检输出：
+- `backend/logs/fsu_raw_packets/readonly-observation-run-*.md/json`
+- `backend/logs/fsu_raw_packets/readonly-observation-scheduler.log`
+- `backend/logs/fsu_raw_packets/daily-observation-*.md/json`
+- `backend/logs/fsu_raw_packets/new-frame-types-*.md/json`
+- `backend/logs/fsu_raw_packets/current-dsc-rds-state-*.md/json`
+- `backend/logs/fsu_raw_packets/dsc-rds-annotation-v0.2-*.md/json`
+
+截至最近一次验证，任务已能生成 `readonly-observation-run-*` 报告，且保持 `noUdpSent=true`、`sendOneShotAckNotRun=true`、`noAckAdded=true`、`gatewayReplyLogicUnchanged=true`、`businessTablesUnchanged=true`。
+
+相关文档：
+- FSU 协议分析笔记：`docs/fsu-2808im-protocol-notes.md`
+- FSU 接入诊断页与日报说明：`docs/fsu-2808im-stage-summary-2026-04-30.md`
+- FSU 后续只读工作：`docs/fsu-2808im-next-steps.md`
+- FSU 安全操作说明：`docs/fsu-2808im-safe-operation-notes.md`
+- FSU 只读巡检定时任务：`docs/fsu-readonly-observation-scheduler.md`
 
 ### 7.1 认证与会话
 
