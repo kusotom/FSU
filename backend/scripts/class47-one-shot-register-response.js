@@ -53,11 +53,14 @@ function parseArgs(argv) {
     healthUrl: DEFAULT_HEALTH_URL,
     outDir: DEFAULT_OUT_DIR,
     execute: false,
+    executeLatest: false,
     showHex: false,
     understoodUdp: false,
+    confirmLatest0x46: false,
     confirmSeq: null,
     confirmTypeBytes: null,
     confirmRequiredMask: null,
+    maxRequestAgeMs: 5000,
     channelUris: { ...DEFAULT_URIS },
   };
   for (let i = 2; i < argv.length; i += 1) {
@@ -75,10 +78,13 @@ function parseArgs(argv) {
     else if (key === "--channel9-uri") args.channelUris[9] = argv[++i];
     else if (key === "--show-hex") args.showHex = true;
     else if (key === "--execute") args.execute = true;
+    else if (key === "--execute-latest") args.executeLatest = true;
     else if (key === "--i-understand-this-sends-one-udp-packet") args.understoodUdp = true;
+    else if (key === "--confirm-latest-0x46") args.confirmLatest0x46 = true;
     else if (key === "--confirm-seq") args.confirmSeq = Number(argv[++i]);
     else if (key === "--confirm-typeBytes") args.confirmTypeBytes = String(argv[++i] || "").toLowerCase();
     else if (key === "--confirm-requiredMask") args.confirmRequiredMask = String(argv[++i] || "").toLowerCase();
+    else if (key === "--max-request-age-ms") args.maxRequestAgeMs = Number(argv[++i]);
   }
   return args;
 }
@@ -292,6 +298,28 @@ function selectedRequestSummary(frame) {
   };
 }
 
+function parseTimestampMs(timestamp) {
+  if (!timestamp) return null;
+  const ms = Date.parse(timestamp);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function selectedRequestFreshness(frame, now = new Date()) {
+  const timestampMs = parseTimestampMs(frame.timestamp);
+  if (timestampMs === null) {
+    return {
+      timestampParseOk: false,
+      ageMs: null,
+      nowIso: now.toISOString(),
+    };
+  }
+  return {
+    timestampParseOk: true,
+    ageMs: Math.max(0, now.getTime() - timestampMs),
+    nowIso: now.toISOString(),
+  };
+}
+
 function renderMarkdown(report) {
   return [
     "# FSU classByte=0x47 one-shot dry-run report",
@@ -394,7 +422,17 @@ function validateCandidate(payloadSummary, summary) {
 function assertExecuteAllowed(args, report, selectedRequest, input) {
   const errors = [];
   if (!args.understoodUdp) errors.push("missing --i-understand-this-sends-one-udp-packet");
-  if (args.confirmSeq !== selectedRequest.parsed.seqLE) errors.push("--confirm-seq does not match latest selected 0x46 request seqLE");
+  if (args.executeLatest) {
+    if (!args.confirmLatest0x46) errors.push("missing --confirm-latest-0x46 for --execute-latest");
+    if (!Number.isFinite(args.maxRequestAgeMs) || args.maxRequestAgeMs <= 0) errors.push("--max-request-age-ms must be a positive number");
+    const freshness = report.selectedRequestFreshness || {};
+    if (!freshness.timestampParseOk) errors.push("latest selected 0x46 request timestamp is not parseable");
+    if (freshness.ageMs === null || freshness.ageMs > args.maxRequestAgeMs) {
+      errors.push(`latest selected 0x46 request is stale: ageMs=${freshness.ageMs}, maxRequestAgeMs=${args.maxRequestAgeMs}`);
+    }
+  } else if (args.confirmSeq !== selectedRequest.parsed.seqLE) {
+    errors.push("--confirm-seq does not match latest selected 0x46 request seqLE");
+  }
   if (args.confirmTypeBytes !== "110047ff") errors.push("--confirm-typeBytes must be 110047ff");
   if (args.confirmRequiredMask !== "0x3f") errors.push("--confirm-requiredMask must be 0x3f");
   if (report.precheck.readiness !== "ready") errors.push("latest precheck readiness is not ready");
@@ -436,13 +474,18 @@ async function main() {
   const health = await requestHealth(args.healthUrl);
   const validationErrors = validateCandidate(payloadSummary, candidate);
   const mode = args.execute ? "execute" : "dry-run";
+  const freshness = selectedRequestFreshness(selected);
 
   const report = {
     mode,
     sent: false,
     sendCount: 0,
     generatedAt: new Date().toISOString(),
+    selectedAtExecuteTime: Boolean(args.execute && args.executeLatest),
+    executeLatest: Boolean(args.executeLatest),
+    maxRequestAgeMs: args.maxRequestAgeMs,
     selectedRequest: selectedRequestSummary(selected),
+    selectedRequestFreshness: freshness,
     payload: payloadSummary,
     candidateFrame: candidate,
     precheck,
