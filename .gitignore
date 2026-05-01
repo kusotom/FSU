@@ -16,6 +16,10 @@ backend/.env
 
 # Local runtime artifacts
 runtime-logs/
+backend/logs/
 runtime-data/
 snapshots/
 backend/snapshots/
+
+backend/logs/fsu_raw_packets/class47-one-shot-precheck-*.md
+backend/logs/fsu_raw_packets/class47-one-shot-precheck-*.json
