@@ -61,6 +61,9 @@ function parseArgs(argv) {
     confirmTypeBytes: null,
     confirmRequiredMask: null,
     maxRequestAgeMs: 5000,
+    targetMode: "source-port",
+    targetHost: null,
+    targetPort: null,
     channelUris: { ...DEFAULT_URIS },
   };
   for (let i = 2; i < argv.length; i += 1) {
@@ -85,6 +88,9 @@ function parseArgs(argv) {
     else if (key === "--confirm-typeBytes") args.confirmTypeBytes = String(argv[++i] || "").toLowerCase();
     else if (key === "--confirm-requiredMask") args.confirmRequiredMask = String(argv[++i] || "").toLowerCase();
     else if (key === "--max-request-age-ms") args.maxRequestAgeMs = Number(argv[++i]);
+    else if (key === "--target-mode") args.targetMode = String(argv[++i] || "").toLowerCase();
+    else if (key === "--target-host") args.targetHost = argv[++i];
+    else if (key === "--target-port") args.targetPort = Number(argv[++i]);
   }
   return args;
 }
@@ -320,6 +326,79 @@ function selectedRequestFreshness(frame, now = new Date()) {
   };
 }
 
+function extractDeclaredUdpUris(frame) {
+  const ascii = frame.buffer.toString("latin1");
+  const matches = [];
+  const regex = /udp:\/\/(?:\[[^\]]+\]|[A-Za-z0-9_.-]+):\d+/g;
+  let match;
+  while ((match = regex.exec(ascii)) !== null) {
+    const uri = match[0];
+    const parsed = /^udp:\/\/(.+):(\d+)$/.exec(uri);
+    matches.push({
+      uri,
+      host: parsed ? parsed[1].replace(/^\[|\]$/g, "") : null,
+      port: parsed ? Number(parsed[2]) : null,
+      offset: match.index,
+    });
+  }
+  return matches;
+}
+
+function resolveTargetStrategy(args, selectedRequest) {
+  const declaredUdpUris = extractDeclaredUdpUris(selectedRequest);
+  if (args.targetMode === "source-port") {
+    return {
+      targetMode: args.targetMode,
+      targetHost: selectedRequest.remoteAddress,
+      targetPort: selectedRequest.remotePort,
+      targetSource: "latest 0x46 request remoteAddress/remotePort",
+      declaredUdpUris,
+      fallbackUsed: false,
+    };
+  }
+  if (args.targetMode === "declared-6002") {
+    const declared = declaredUdpUris.find((item) => item.host === DEVICE_IP && item.port === 6002)
+      || declaredUdpUris.find((item) => item.port === 6002);
+    if (declared) {
+      return {
+        targetMode: args.targetMode,
+        targetHost: declared.host === "dhcp" ? selectedRequest.remoteAddress : declared.host,
+        targetPort: declared.port,
+        targetSource: "0x46 payload declared UDP URI",
+        declaredUdpUris,
+        selectedDeclaredUri: declared.uri,
+        fallbackUsed: false,
+      };
+    }
+    return {
+      targetMode: args.targetMode,
+      targetHost: args.targetHost,
+      targetPort: args.targetPort,
+      targetSource: "fallback --target-host/--target-port because declared udp://*:6002 was not found",
+      declaredUdpUris,
+      fallbackUsed: true,
+    };
+  }
+  if (args.targetMode === "manual") {
+    return {
+      targetMode: args.targetMode,
+      targetHost: args.targetHost,
+      targetPort: args.targetPort,
+      targetSource: "manual --target-host/--target-port",
+      declaredUdpUris,
+      fallbackUsed: false,
+    };
+  }
+  return {
+    targetMode: args.targetMode,
+    targetHost: null,
+    targetPort: null,
+    targetSource: "invalid target mode",
+    declaredUdpUris,
+    fallbackUsed: false,
+  };
+}
+
 function renderMarkdown(report) {
   return [
     "# FSU classByte=0x47 one-shot dry-run report",
@@ -365,6 +444,12 @@ function renderMarkdown(report) {
     "",
     `- checksumValid: \`${report.candidateFrame.checksumValid}\``,
     `- checksumHex: \`${report.candidateFrame.checksumHex}\``,
+    "",
+    "## Target strategy",
+    "",
+    "```json",
+    JSON.stringify(report.targetStrategy, null, 2),
+    "```",
     "",
     "## 7. Precheck reference",
     "",
@@ -419,6 +504,21 @@ function validateCandidate(payloadSummary, summary) {
   return errors;
 }
 
+function validateTargetStrategy(targetStrategy) {
+  const errors = [];
+  if (!["source-port", "declared-6002", "manual"].includes(targetStrategy.targetMode)) {
+    errors.push(`invalid target mode: ${targetStrategy.targetMode}`);
+  }
+  if (!targetStrategy.targetHost) errors.push("targetHost is missing");
+  if (!Number.isInteger(targetStrategy.targetPort) || targetStrategy.targetPort <= 0 || targetStrategy.targetPort > 65535) {
+    errors.push("targetPort must be a valid UDP port");
+  }
+  if (targetStrategy.targetMode === "declared-6002" && targetStrategy.targetPort !== 6002) {
+    errors.push("declared-6002 target mode must resolve targetPort=6002");
+  }
+  return errors;
+}
+
 function assertExecuteAllowed(args, report, selectedRequest, input) {
   const errors = [];
   if (!args.understoodUdp) errors.push("missing --i-understand-this-sends-one-udp-packet");
@@ -436,6 +536,7 @@ function assertExecuteAllowed(args, report, selectedRequest, input) {
   if (args.confirmTypeBytes !== "110047ff") errors.push("--confirm-typeBytes must be 110047ff");
   if (args.confirmRequiredMask !== "0x3f") errors.push("--confirm-requiredMask must be 0x3f");
   if (report.precheck.readiness !== "ready") errors.push("latest precheck readiness is not ready");
+  errors.push(...validateTargetStrategy(report.targetStrategy));
   const git = gitClean();
   if (!git.clean) errors.push("Git workspace is not clean");
   const growth = rawLogGrowing(input, 3000);
@@ -475,6 +576,7 @@ async function main() {
   const validationErrors = validateCandidate(payloadSummary, candidate);
   const mode = args.execute ? "execute" : "dry-run";
   const freshness = selectedRequestFreshness(selected);
+  const targetStrategy = resolveTargetStrategy(args, selected);
 
   const report = {
     mode,
@@ -486,6 +588,7 @@ async function main() {
     maxRequestAgeMs: args.maxRequestAgeMs,
     selectedRequest: selectedRequestSummary(selected),
     selectedRequestFreshness: freshness,
+    targetStrategy,
     payload: payloadSummary,
     candidateFrame: candidate,
     precheck,
@@ -503,7 +606,9 @@ async function main() {
     },
     warnings: [
       "110047ff is not online-validated.",
-      args.showHex
+      args.execute
+        ? "Execute mode is one-shot only and remains experimental."
+        : args.showHex
         ? "OFFLINE CANDIDATE ONLY. DO NOT SEND WITHOUT --execute AND HUMAN APPROVAL."
         : "Dry-run only. No UDP sent.",
       "URI strategy remains unvalidated online.",
@@ -528,6 +633,7 @@ async function main() {
         frameHexPrefix: report.candidateFrame.frameHexPrefix,
         fullFrameHexIncluded: report.candidateFrame.fullFrameHexIncluded,
       },
+      targetStrategy: report.targetStrategy,
       precheck: report.precheck,
       reportMd: paths.mdPath,
       reportJson: paths.jsonPath,
@@ -555,7 +661,7 @@ async function main() {
   const pending = { ...report, pendingSendAt: new Date().toISOString(), pending: true };
   writeReport(pending, args.outDir, "execute");
   await new Promise((resolve, reject) => {
-    client.send(frame, selected.remotePort, selected.remoteAddress, (error) => {
+    client.send(frame, targetStrategy.targetPort, targetStrategy.targetHost, (error) => {
       client.close();
       if (error) reject(error);
       else resolve();
@@ -566,7 +672,7 @@ async function main() {
   report.safety.udpSent = true;
   report.safety.onlineExperimentExecuted = true;
   const paths = writeReport(report, args.outDir, "execute");
-  console.log(JSON.stringify({ sent: true, sendCount: 1, reportMd: paths.mdPath, reportJson: paths.jsonPath }, null, 2));
+  console.log(JSON.stringify({ sent: true, sendCount: 1, targetHost: targetStrategy.targetHost, targetPort: targetStrategy.targetPort, targetMode: targetStrategy.targetMode, reportMd: paths.mdPath, reportJson: paths.jsonPath }, null, 2));
 }
 
 main().catch((error) => {
