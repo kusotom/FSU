@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
+from app.modules.fsu_gateway.dsc_class47 import (
+    Class47BuildResult,
+    build_class47_response_from_request,
+    evaluate_guarded_policy,
+)
 
 LOGGER = logging.getLogger("fsu-gateway")
 SOAP_PATH = "/services/SCService"
@@ -100,11 +105,28 @@ class RawPacketStore:
         return log_file
 
 
+class Class47ExperimentStore:
+    def __init__(self, log_dir: str):
+        self.log_dir = Path(log_dir)
+
+    def write(self, record: dict[str, Any]) -> Path:
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = self.log_dir / f"class47-experiment-{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+        with log_file.open("a", encoding="utf-8") as fp:
+            fp.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+        return log_file
+
+
 class FsuGatewayService:
     def __init__(self):
         self.store = RawPacketStore(settings.fsu_raw_log_dir)
+        self.class47_store = Class47ExperimentStore(settings.fsu_raw_log_dir)
         self._transports: list[asyncio.DatagramTransport] = []
         self._started = False
+        self._class47_send_count = 0
+        self._class47_guarded_window_started_at: datetime | None = None
+        self._class47_guarded_last_send_at: datetime | None = None
+        self._class47_guarded_seen_245_in_window = False
 
     @property
     def enabled(self) -> bool:
@@ -196,6 +218,204 @@ class FsuGatewayService:
             log_file,
         )
 
+    def _record_class47_experiment(
+        self,
+        *,
+        action: str,
+        mode: str,
+        protocol: str,
+        remote: tuple[str, int],
+        local_port: int,
+        request: bytes,
+        result: Class47BuildResult | None,
+        reason: str,
+        max_sends: int | None = None,
+        seconds_since_last_send: float | None = None,
+        seen_245_in_window: bool | None = None,
+    ) -> None:
+        record = {
+            "ts": _utc_now_text(),
+            "action": action,
+            "mode": mode,
+            "protocol": protocol,
+            "remoteIp": remote[0],
+            "remotePort": remote[1],
+            "localPort": local_port,
+            "requestLength": len(request),
+            "requestTypeBytes": request[4:8].hex() if len(request) >= 8 else "",
+            "requestSeqLE": str(int.from_bytes(request[2:4], "little")) if len(request) >= 4 else "",
+            "responseTypeBytes": result.response_type_bytes if result else "110047ff",
+            "responseLength": result.total_length if result else None,
+            "payloadLength": result.payload_length if result else None,
+            "checksumLE": result.checksum_le if result else "",
+            "reason": reason,
+            "sendCount": self._class47_send_count,
+            "maxSends": max_sends,
+            "secondsSinceLastSend": seconds_since_last_send,
+            "seen245InWindow": seen_245_in_window,
+        }
+        log_file = self.class47_store.write(record)
+        LOGGER.info("fsu-gateway class47 action=%s reason=%s log=%s", action, reason, log_file)
+
+    def handle_class47_candidate(
+        self,
+        *,
+        protocol: str,
+        payload: bytes,
+        remote: tuple[str, int],
+        local_port: int,
+        transport: asyncio.DatagramTransport,
+    ) -> None:
+        mode = (settings.fsu_class47_mode or "off").strip().lower()
+        if mode == "off":
+            return
+        if mode not in {"dryrun", "oneshot", "guarded"}:
+            self._record_class47_experiment(
+                action="skipped",
+                mode=mode,
+                protocol=protocol,
+                remote=remote,
+                local_port=local_port,
+                request=payload,
+                result=None,
+                reason=f"invalid_mode:{mode}",
+            )
+            return
+        if protocol != "UDP_DSC":
+            return
+        if remote[0] != settings.fsu_class47_allowed_device_ip:
+            self._record_class47_experiment(
+                action="skipped",
+                mode=mode,
+                protocol=protocol,
+                remote=remote,
+                local_port=local_port,
+                request=payload,
+                result=None,
+                reason="remote_ip_not_allowed",
+            )
+            return
+
+        result = build_class47_response_from_request(
+            payload,
+            settings.fsu_class47_platform_ip,
+            settings.fsu_class47_dsc_port,
+            settings.fsu_class47_rds_port,
+        )
+        if not result.ok or result.response is None:
+            self._record_class47_experiment(
+                action="skipped",
+                mode=mode,
+                protocol=protocol,
+                remote=remote,
+                local_port=local_port,
+                request=payload,
+                result=result,
+                reason=result.reason,
+            )
+            return
+
+        if mode == "dryrun":
+            self._record_class47_experiment(
+                action="dryrun_build_only",
+                mode=mode,
+                protocol=protocol,
+                remote=remote,
+                local_port=local_port,
+                request=payload,
+                result=result,
+                reason="ok",
+            )
+            return
+
+        if mode == "oneshot":
+            max_sends = settings.fsu_class47_max_sends
+            if self._class47_send_count >= max_sends:
+                self._record_class47_experiment(
+                    action="skipped",
+                    mode=mode,
+                    protocol=protocol,
+                    remote=remote,
+                    local_port=local_port,
+                    request=payload,
+                    result=result,
+                    reason="max_sends_reached",
+                    max_sends=max_sends,
+                )
+                return
+
+            transport.sendto(result.response, remote)
+            self._class47_send_count += 1
+            self._record_class47_experiment(
+                action="oneshot_sent",
+                mode=mode,
+                protocol=protocol,
+                remote=remote,
+                local_port=local_port,
+                request=payload,
+                result=result,
+                reason="ok",
+                max_sends=max_sends,
+            )
+            return
+
+        # guarded mode
+        now = _utc_now()
+        if self._class47_guarded_window_started_at is None:
+            self._class47_guarded_window_started_at = now
+        if result.request_length == 245:
+            self._class47_guarded_seen_245_in_window = True
+
+        elapsed_window_seconds = (now - self._class47_guarded_window_started_at).total_seconds()
+        seconds_since_last_send: float | None = None
+        if self._class47_guarded_last_send_at is not None:
+            seconds_since_last_send = (now - self._class47_guarded_last_send_at).total_seconds()
+
+        decision = evaluate_guarded_policy(
+            request_length=result.request_length or len(payload),
+            send_count=self._class47_send_count,
+            max_sends=settings.fsu_class47_guarded_max_sends,
+            seconds_since_last_send=seconds_since_last_send,
+            min_interval_seconds=settings.fsu_class47_guarded_min_interval_seconds,
+            elapsed_window_seconds=elapsed_window_seconds,
+            window_seconds=settings.fsu_class47_guarded_window_seconds,
+            prefer_request_length=settings.fsu_class47_prefer_request_length,
+            skip_209_when_245_seen=settings.fsu_class47_skip_209_when_245_seen,
+            seen_245_in_window=self._class47_guarded_seen_245_in_window,
+        )
+        if not decision.send:
+            self._record_class47_experiment(
+                action=decision.action,
+                mode=mode,
+                protocol=protocol,
+                remote=remote,
+                local_port=local_port,
+                request=payload,
+                result=result,
+                reason=decision.reason,
+                max_sends=settings.fsu_class47_guarded_max_sends,
+                seconds_since_last_send=seconds_since_last_send,
+                seen_245_in_window=self._class47_guarded_seen_245_in_window,
+            )
+            return
+
+        transport.sendto(result.response, remote)
+        self._class47_send_count += 1
+        self._class47_guarded_last_send_at = now
+        self._record_class47_experiment(
+            action=decision.action,
+            mode=mode,
+            protocol=protocol,
+            remote=remote,
+            local_port=local_port,
+            request=payload,
+            result=result,
+            reason=decision.reason,
+            max_sends=settings.fsu_class47_guarded_max_sends,
+            seconds_since_last_send=seconds_since_last_send,
+            seen_245_in_window=self._class47_guarded_seen_245_in_window,
+        )
+
     def record_soap_request(
         self,
         *,
@@ -269,6 +489,13 @@ class _FsuUdpProtocol(asyncio.DatagramProtocol):
             remote=addr,
             local_port=local_port,
             ack=ack,
+        )
+        self.gateway.handle_class47_candidate(
+            protocol=self.protocol,
+            payload=data,
+            remote=addr,
+            local_port=local_port,
+            transport=self.transport,
         )
         self.transport.sendto(ack, addr)
 

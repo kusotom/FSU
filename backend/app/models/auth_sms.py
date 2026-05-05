@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -9,6 +9,10 @@ from app.db.base import Base
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+SQLITE_SAFE_INET = INET().with_variant(String(64), "sqlite")
+SQLITE_SAFE_JSONB = JSONB().with_variant(JSON(), "sqlite")
 
 
 class SmsCodeLog(Base):
@@ -61,7 +65,7 @@ class AuthSmsCode(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    client_ip: Mapped[str | None] = mapped_column(INET, nullable=True)
+    client_ip: Mapped[str | None] = mapped_column(SQLITE_SAFE_INET, nullable=True)
     client_user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
     client_device_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default="unisms")
@@ -99,15 +103,15 @@ class AuthSmsDeliveryLog(Base):
     message_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     price: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
-    submit_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    submit_response: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    submit_payload: Mapped[dict | None] = mapped_column(SQLITE_SAFE_JSONB, nullable=True)
+    submit_response: Mapped[dict | None] = mapped_column(SQLITE_SAFE_JSONB, nullable=True)
     dlr_status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     dlr_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     dlr_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     submit_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     done_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    raw_webhook_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    raw_webhook_headers: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    raw_webhook_payload: Mapped[dict | None] = mapped_column(SQLITE_SAFE_JSONB, nullable=True)
+    raw_webhook_headers: Mapped[dict | None] = mapped_column(SQLITE_SAFE_JSONB, nullable=True)
     webhook_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     webhook_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)

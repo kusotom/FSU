@@ -1818,3 +1818,50 @@ node backend\scripts\parse-class47-register-response-offline.js --payload-hex <p
 - `payload[0]=0` alone is not enough for full Register OK.
 - Still no online ACK/register-response experiment is recommended.
 
+---
+
+## B Interface P2-005
+
+`[BIF-P2-005] 自动升级与 SET_FSUREBOOT 流程` 已完成当前阶段安全框架实现。
+
+本阶段结论：
+- 规范方向：`SC -> FSU`
+- 当前状态：`安全禁用`
+- 已实现：控制命令识别、参数解析、策略判断、禁用态响应、授权 dry-run 响应、JSONL 审计记录、单元测试
+- 默认禁止：真实升级、真实重启、真实设备控制、升级包下载/保存、任何 UDP/TCP/HTTP 控制发包
+
+当前已识别控制命令：
+- `SET_FSUREBOOT`
+- `AUTO_UPGRADE`
+- `SET_AUTOUPGRADE`
+- `SET_FSUUPGRADE`
+- `SET_UPGRADE`
+
+默认策略：
+- `B_INTERFACE_ALLOW_AUTO_UPGRADE=false`
+- `B_INTERFACE_ALLOW_FSU_REBOOT=false`
+- `B_INTERFACE_ALLOW_REAL_DEVICE_CONTROL=false`
+- `B_INTERFACE_CONTROL_DRY_RUN_ONLY=true`
+
+策略语义：
+- 默认：`allowed=false`、`blocked=true`、`dry_run=true`、`executed=false`
+- 授权模式：也只允许 `accepted_dry_run`，`executed` 仍然恒为 `false`
+
+审计能力：
+- 控制命令请求会写入 `backend/logs/b_interface/soap-invoke-YYYY-MM-DD.jsonl`
+- 已新增控制审计字段：`direction`、`command_name`、`policy_allowed`、`blocked`、`dry_run`、`executed`、`reason`、`correlation_id`
+- 敏感字段继续脱敏，包括 `password/passwd/pwd/token/secret/authorization/ftp_password`
+
+测试结果：
+- `python -m compileall backend\app`：通过
+- `.\.venv\Scripts\python.exe -m unittest tests.test_b_interface_soap -v`：通过，`78/78 OK`
+
+安全边界：
+- 未修改 `backend/app/modules/fsu_gateway/`
+- 未修改 `backend/scripts/fsu-ack-experiments/`
+- 未新增真实 UDP ACK
+- 未执行 `subprocess` / `os.system` / `reboot` / `shutdown`
+
+详细说明见：
+- `docs/b-interface-p2-005-auto-upgrade-reboot.md`
+- `docs/b-interface-p2-005-acceptance.md`

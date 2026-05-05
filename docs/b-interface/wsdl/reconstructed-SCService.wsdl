@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/" xmlns:impl="http://SCService.chinatowercom.com" xmlns:intf="http://SCService.chinatowercom.com" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:wsdlsoap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" targetNamespace="http://SCService.chinatowercom.com">
+  <message name="invokeRequest">
+    <part name="xmlData" type="soapenc:string"/>
+  </message>
+  <message name="invokeResponse">
+    <part name="invokeReturn" type="soapenc:string"/>
+  </message>
+  <portType name="SCService">
+    <operation name="invoke" parameterOrder="xmlData">
+      <input message="impl:invokeRequest" name="invokeRequest"/>
+      <output message="impl:invokeResponse" name="invokeResponse"/>
+    </operation>
+  </portType>
+  <binding name="SCServiceSoapBinding" type="impl:SCService">
+    <wsdlsoap:binding style="rpc" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <operation name="invoke">
+      <wsdlsoap:operation soapAction=""/>
+      <input name="invokeRequest">
+        <wsdlsoap:body use="encoded" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" namespace="http://SCService.chinatowercom.com"/>
+      </input>
+      <output name="invokeResponse">
+        <wsdlsoap:body use="encoded" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" namespace="http://SCService.chinatowercom.com"/>
+      </output>
+    </operation>
+  </binding>
+  <service name="SCServiceService">
+    <port name="SCService" binding="impl:SCServiceSoapBinding">
+      <wsdlsoap:address location="http://127.0.0.1:8080/services/SCService"/>
+    </port>
+  </service>
+</definitions>

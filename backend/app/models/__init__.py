@@ -22,6 +22,12 @@ from app.models.telemetry import TelemetryHistory, TelemetryLatest
 from app.models.system_config import SystemConfig
 from app.models.user import Role, RolePermission, User, UserDataScope, user_roles
 from app.models.b_device import BDevice, BDeviceConfig
+from app.models.b_interface_alarm import BInterfaceAlarmHistory, BInterfaceCurrentAlarm
+from app.models.b_interface_fsu_status import BInterfaceFsuStatus
+from app.models.b_interface_history import BInterfaceHistory
+from app.models.b_interface_info_cache import BInterfaceFsuInfoCache, BInterfaceLoginInfoCache
+from app.models.b_interface_outbound_call import BInterfaceOutboundCall
+from app.models.b_interface_realtime import BInterfaceRealtime
 
 __all__ = [
     "User",
@@ -62,4 +68,12 @@ __all__ = [
     "AuthSmsDeliveryLog",
     "BDevice",
     "BDeviceConfig",
+    "BInterfaceCurrentAlarm",
+    "BInterfaceAlarmHistory",
+    "BInterfaceFsuStatus",
+    "BInterfaceHistory",
+    "BInterfaceFsuInfoCache",
+    "BInterfaceLoginInfoCache",
+    "BInterfaceOutboundCall",
+    "BInterfaceRealtime",
 ]

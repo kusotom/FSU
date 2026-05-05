@@ -8,7 +8,7 @@ from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.api.router import api_router
-from app.api.routes.b_interface_2016 import service_router as b_interface_2016_service_router
+from app.api.routes.b_interface_logs import router as b_interface_logs_router
 from app.api.routes.ingest import start_ingest_queue_workers, stop_ingest_queue_workers
 from app.core.config import settings
 from app.core.security import decode_access_token
@@ -16,6 +16,7 @@ from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models import *  # noqa: F401,F403
 from app.models.user import User
+from app.modules.b_interface import service_router as b_interface_service_router
 from app.modules.fsu_gateway import get_fsu_gateway
 from app.modules.fsu_gateway.routes import health_router as fsu_gateway_health_router
 from app.modules.fsu_gateway.routes import soap_router as fsu_gateway_soap_router
@@ -34,10 +35,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(api_router, prefix=settings.api_v1_prefix)
+app.include_router(b_interface_logs_router)
 app.include_router(fsu_gateway_health_router)
 if settings.fsu_gateway_enabled:
     app.include_router(fsu_gateway_soap_router)
-app.include_router(b_interface_2016_service_router)
+app.include_router(b_interface_service_router)
 system_rule_task: asyncio.Task | None = None
 
 
